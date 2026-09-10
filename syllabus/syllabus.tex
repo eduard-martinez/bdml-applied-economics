@@ -1,0 +1,345 @@
+\documentclass[12pt,a4paper]{article}
+
+% Idioma y codificación
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+% Espaciado entre párrafos
+\usepackage{parskip}
+
+% Listas, tablas y enlaces
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, urlcolor=blue, linkcolor=black, citecolor=black}
+
+% Estilo de secciones
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries}{\thesubsubsection}{1em}{}
+\setlist[itemize]{topsep=2pt,parsep=2pt,partopsep=0pt,leftmargin=1.5em}
+\setlist[enumerate]{topsep=2pt,parsep=2pt,partopsep=0pt,leftmargin=1.8em}
+
+% Datos del curso
+\title{\textbf{FACULTAD DE ECONOMÍA Y NEGOCIOS \\ Departamento de Economía} \\
+Big Data y Machine Learning para Economía Aplicada}
+\author{Prof. Eduard Fernando Martínez González, Ph.D.}
+\date{}
+
+% Marca de agua en la primera página
+\usepackage{eso-pic}
+\usepackage{graphicx}
+\AddToShipoutPictureBG*{
+\AtPageUpperLeft{\raisebox{-3cm}{\hspace{2cm}\includegraphics[width=5cm]{pics/logo.png}}}}
+
+%%=================================================
+\begin{document}
+
+\maketitle
+\begin{itemize}
+\item \textbf{Código-Materia:} ECO-XXXXX
+\item \textbf{Programa:} Maestría en Economía (ME)
+\item \textbf{Prerrequisito:} Econometría I y II (o equivalente). Se recomienda manejo básico de \texttt{R}; no es requisito.
+\item \textbf{Período académico:} 2026-0X
+\item \textbf{Intensidad semanal:} 3 horas
+\item \textbf{Créditos:} 3
+\end{itemize}
+
+%%=================================================
+\section{Descripción del curso}
+
+En Inferencia Causal el objetivo es identificar correctamente un parámetro: el efecto $\beta$ de una intervención sobre un resultado. En este curso el objetivo cambia de lugar: nos interesa $Y$, es decir, construir modelos capaces de \textbf{predecir bien la variable de interés} con datos que el modelo no ha visto, saber \textbf{evaluar} esa capacidad predictiva con honestidad y \textbf{abrir el modelo} para entender de qué depende la predicción. Esa distinción entre explicar y predecir organiza todo el semestre y se marca desde la primera sesión.
+
+El curso introduce a los estudiantes de la Maestría en Economía al marco del aprendizaje estadístico y a las herramientas de \emph{machine learning} (ML) más usadas hoy en economía aplicada y finanzas: regresión como máquina de predecir, clasificación, validación cruzada, regularización (Ridge, Lasso, Elastic Net), árboles, \emph{random forests} y \emph{boosting}, herramientas de interpretación (importancia de variables, dependencia parcial, valores SHAP) y redes neuronales. La progresión sigue la de \emph{An Introduction to Statistical Learning} (James, Witten, Hastie y Tibshirani, 2.ª ed.), el texto guía del curso.
+
+El tratamiento combina \textbf{formalidad suficiente} con \textbf{mucha intuición}. Para cada método se presenta su función objetivo y sus hiperparámetros, se explica qué problema resuelve y cómo funciona, se implementa sobre datos reales en \texttt{R}, se evalúa su desempeño fuera de muestra frente a un modelo de referencia y se interpretan sus resultados. Las derivaciones extensas viven en apéndices de cada sesión, disponibles para quien quiera profundizar. Tres conjuntos de datos atraviesan el curso: un panel de mesas electorales colombianas con características censales, precios de vivienda en Bogotá e imágenes satelitales.
+
+Con la misma lógica del curso de Inferencia Causal, cada sesión se acompaña de un artículo aplicado reciente que un estudiante presenta, y el semestre culmina en un proyecto en el que los equipos formulan una pregunta predictiva, comparan varios algoritmos y defienden sus resultados.
+
+%%=================================================
+\section{Resultados de aprendizaje}
+
+Al finalizar el curso, el estudiante será capaz de:
+
+\begin{itemize}
+    \item Distinguir un problema de predicción de un problema de inferencia causal, y reconocer cuándo la capacidad predictiva fuera de muestra es la cantidad de interés.
+    \item Construir el flujo de trabajo completo de un ejercicio predictivo: partición de los datos, preprocesamiento dentro del \emph{pipeline}, validación cruzada, ajuste de hiperparámetros, evaluación e interpretación.
+    \item Evaluar modelos de regresión y clasificación con las métricas apropiadas (RMSE, MAE, $R^2$ fuera de muestra, AUC, calibración, errores de inclusión y exclusión), con su incertidumbre y frente a un modelo de referencia, y diagnosticar dónde se concentran los errores.
+    \item Aplicar y comparar regularización, árboles, \emph{random forests}, \emph{boosting} y redes neuronales sobre datos económicos, sabiendo cuándo conviene cada familia.
+    \item Interpretar modelos flexibles con importancia de variables, dependencia parcial y valores SHAP, distinguiendo lo que describen (de qué depende la predicción) de lo que no establecen (efectos causales).
+    \item Leer críticamente y presentar artículos de economía y finanzas que usan ML, evaluando la pertinencia del método, de la validación y de la interpretación.
+    \item Implementar todo lo anterior en \texttt{R} (\texttt{tidymodels}, \texttt{glmnet}, \texttt{ranger}, \texttt{xgboost}, \texttt{DALEX} y \texttt{shapviz}, \texttt{keras}), con traducción opcional a Python.
+\end{itemize}
+
+%%=================================================
+\section{Contenido}
+
+Las nueve sesiones siguen la progresión de ISL: marco del aprendizaje estadístico, regresión lineal como \emph{baseline}, clasificación, remuestreo y validación, selección y regularización, métodos basados en árboles y redes neuronales, con una sesión dedicada a la interpretación de modelos y un cierre sobre estructura sin variable de respuesta y la frontera con la inferencia causal. El Problem Set 1 cubre las sesiones 1--5 y el Problem Set 2 las sesiones 6--9.
+
+\subsection{Módulo 1: Fundamentos y evaluación}
+
+\subsubsection{Sesión 1 --- Predecir, no explicar: el marco del aprendizaje estadístico}
+\textbf{Temas:}
+\begin{itemize}
+    \item De $\beta$ a $Y$: los mismos datos, dos preguntas; \emph{prediction policy problems}; la predictibilidad fuera de muestra como cantidad de interés.
+    \item Qué es aprender $f$; paramétrico vs.\ no paramétrico; flexibilidad vs.\ interpretabilidad.
+    \item Error de entrenamiento vs.\ error de prueba; sobreajuste; la curva U; sesgo--varianza con intuición.
+    \item Supervisado y no supervisado; regresión y clasificación; el flujo de trabajo del curso.
+\end{itemize}
+\textbf{Objetivos de aprendizaje:} explicar por qué un coeficiente significativo no es una predicción; definir el riesgo de generalización y las tres piezas del error; separar entrenamiento y prueba antes de tocar cualquier modelo. \\
+\textbf{Lecturas:} ISL, caps.\ 1--2; Mullainathan \& Spiess (2017); Kleinberg, Ludwig, Mullainathan \& Obermeyer (2015). \\
+\textbf{Paper para presentación:} Kim \& Zilinsky (2024), \emph{Division Does Not Imply Predictability}. \\
+\textbf{Aplicación en R:} primera partición entrenamiento/prueba con un modelo lineal sobre el panel de mesas electorales: $R^2$ dentro y fuera de muestra.
+
+\subsubsection{Sesión 2 --- La regresión lineal como máquina de predecir y cómo evaluar una predicción}
+\textbf{Temas:}
+\begin{itemize}
+    \item OLS como predictor: predictores cualitativos, interacciones, transformaciones.
+    \item Más allá de la linealidad: polinomios, escalones, \emph{splines} y GAM; $k$-NN de regresión y la maldición de la dimensionalidad.
+    \item Métricas de regresión: MSE, RMSE, MAE, MAPE y $R^2$ fuera de muestra; modelos de referencia.
+    \item Predicho vs.\ observado y la compresión hacia la media; residuos; error por deciles de $Y$ y por subgrupos; extrapolación.
+\end{itemize}
+\textbf{Objetivos de aprendizaje:} usar la regresión como \emph{baseline} honesto; elegir y leer métricas de regresión; localizar dónde falla un modelo. \\
+\textbf{Lecturas:} ISL, caps.\ 3 y 7 (secciones 7.1--7.7). \\
+\textbf{Paper para presentación:} Bogin \& Shui (2020), \emph{Appraisal Accuracy and Automated Valuation Models in Rural Areas}, o Pace \& Hayunga (2020). \\
+\textbf{Aplicación en R:} precios de vivienda en Bogotá: lineal vs.\ polinomios y \emph{splines} vs.\ $k$-NN; tabla de métricas, dispersión predicho vs.\ observado, error por decil de precio.
+
+\subsubsection{Sesión 3 --- Clasificación: de la logística a las métricas que deciden}
+\textbf{Temas:}
+\begin{itemize}
+    \item Por qué no OLS; regresión logística (binaria y multinomial); LDA, QDA y Naive Bayes en breve; $k$-NN.
+    \item Probabilidades vs.\ clases: el umbral como decisión con costos.
+    \item Matriz de confusión; exactitud, precisión, \emph{recall}, F1 y \emph{balanced accuracy}; por qué la exactitud engaña con prevalencia desigual.
+    \item ROC/AUC vs.\ precisión--\emph{recall}; calibración; desbalanceo de clases y sus remedios.
+\end{itemize}
+\textbf{Objetivos de aprendizaje:} predecir categorías con probabilidades calibradas; elegir la métrica y el umbral según el problema económico. \\
+\textbf{Lecturas:} ISL, cap.\ 4; Fawcett (2006). \\
+\textbf{Paper para presentación:} Kleinberg, Lakkaraju, Leskovec, Ludwig \& Mullainathan (2018), o Fuster, Goldsmith-Pinkham, Ramadorai \& Walther (2022). \\
+\textbf{Aplicación en R:} ¿ganó el eventual presidente en la mesa? Logit vs.\ $k$-NN con partición estratificada; AUC vs.\ exactitud bajo desbalance; curva ROC y calibración.
+
+\subsubsection{Sesión 4 --- Remuestreo, validación y el \emph{pipeline} honesto}
+\textbf{Temas:}
+\begin{itemize}
+    \item Conjunto de validación, LOOCV y $k$-fold; el sesgo--varianza del CV; CV en clasificación.
+    \item CV para elegir hiperparámetros: grilla, búsqueda aleatoria y bayesiana; CV anidado.
+    \item \emph{Leakage} y preprocesamiento dentro del \emph{pipeline}.
+    \item CV temporal y espacial: cuándo el $k$-fold aleatorio miente.
+    \item \emph{Bootstrap}: intervalos para las métricas y comparación de modelos.
+\end{itemize}
+\textbf{Objetivos de aprendizaje:} estimar el error de generalización sin engañarse; construir el \emph{pipeline} que se reutiliza el resto del curso. \\
+\textbf{Lecturas:} ISL, cap.\ 5; Roberts et al.\ (2017); Neunhoeffer \& Sternberg (2019). \\
+\textbf{Paper para presentación:} Deppner \& Cajias (2024), \emph{Accounting for Spatial Autocorrelation in Algorithm-Driven Hedonic Models}, o Goulet Coulombe, Leroux, Stevanovic \& Surprenant (2022). \\
+\textbf{Aplicación en R:} \texttt{tidymodels} (\texttt{recipes}, \texttt{rsample}, \texttt{tune}): comparación por CV de los modelos de las sesiones 2 y 3 con intervalos \emph{bootstrap}; CV espacial con las mesas electorales.
+
+\subsubsection{Sesión 5 --- Selección de variables y regularización}
+\textbf{Temas:}
+\begin{itemize}
+    \item Muchos predictores: sobreajuste y colinealidad; selección por subconjuntos y criterios de información frente al CV.
+    \item Ridge (encoger) y Lasso (ceros exactos); Elastic Net; elección de $\lambda$ por CV; caminos de coeficientes.
+    \item PCR y PLS como compresión; la intuición de PCA.
+    \item Alta dimensión: qué falla; el proxy correlacionado; ``el Lasso selecciona predictores, no causas''; doble selección como anticipo de la sesión 9.
+\end{itemize}
+\textbf{Objetivos de aprendizaje:} predecir con muchos predictores sin sobreajustar; entender qué significa (y qué no) que una variable sobreviva a la penalización. \\
+\textbf{Lecturas:} ISL, cap.\ 6; Belloni, Chernozhukov \& Hansen (2014, JEP) como lectura complementaria. \\
+\textbf{Paper para presentación:} Gu, Kelly \& Xiu (2020), \emph{Empirical Asset Pricing via Machine Learning}, o Blumenstock, Cadamuro \& On (2015). \\
+\textbf{Aplicación en R:} precios de vivienda con muchas covariables (\texttt{glmnet}): OLS vs.\ Ridge vs.\ Lasso vs.\ Elastic Net; caminos, curva de CV, comparación fuera de muestra.
+
+\subsection{Módulo 2: Árboles, ensambles e interpretación}
+
+\subsubsection{Sesión 6 --- Árboles, bosques y \emph{boosting}}
+\textbf{Temas:}
+\begin{itemize}
+    \item Árboles de regresión y clasificación: particiones, criterio de corte, poda; por qué un árbol solo es inestable.
+    \item \emph{Bagging}: promediar reduce la varianza; \emph{random forest}: $m$, error \emph{out-of-bag}, importancia nativa.
+    \item \emph{Boosting}: ajustar residuos; tasa de aprendizaje, profundidad, número de árboles y \emph{early stopping}; XGBoost y LightGBM; BART como mención.
+    \item \emph{Random forest} vs.\ \emph{boosting}; ajuste de hiperparámetros con CV; cuándo ganan los árboles en datos tabulares.
+\end{itemize}
+\textbf{Objetivos de aprendizaje:} entender por qué los ensambles de árboles dominan los datos tabulares, ajustarlos y compararlos honestamente con los modelos anteriores. \\
+\textbf{Lecturas:} ISL, cap.\ 8; Breiman (2001). \\
+\textbf{Paper hilo conductor:} Gelvez, Cardiles, Martínez-González \& Muñoz (2026), \emph{How Predictable Is an Election?} \\
+\textbf{Paper para presentación:} Medeiros, Vasconcelos, Veiga \& Zilberman (2021), o Bertrand \& Kamenica (2023). \\
+\textbf{Aplicación en R:} \emph{random forest} y XGBoost para el \emph{vote share} y el ganador local con búsqueda bayesiana de hiperparámetros; tabla comparativa con logit y Lasso; OOB vs.\ CV.
+
+\subsubsection{Sesión 7 --- Abrir la caja negra: importancia, dependencia parcial y SHAP}
+\textbf{Temas:}
+\begin{itemize}
+    \item Para qué interpretar: auditar, comunicar, generar hipótesis; interpretación global y local.
+    \item Importancia por impureza vs.\ por permutación; sesgos con predictores correlacionados; estabilidad por remuestreo.
+    \item Dependencia parcial, ICE y ALE: qué muestran y cuándo engañan.
+    \item Valores de Shapley y SHAP: importancia con signo, gráficos de dependencia, rangos vs.\ magnitudes entre modelos.
+    \item Ablación por bloques de variables; descomposición del $R^2$; error por subgrupos y equidad.
+    \item Lo que la interpretación no es: causalidad, inferencia ecológica, pronóstico.
+\end{itemize}
+\textbf{Objetivos de aprendizaje:} interpretar y auditar modelos flexibles con herramientas estándar, sabiendo qué miden y cuándo engañan. \\
+\textbf{Lecturas:} Molnar (2025), capítulos de importancia por permutación, PDP, ALE y SHAP; Lundberg \& Lee (2017). \\
+\textbf{Paper para presentación:} Bluwstein, Buckmann, Joseph, Kapadia \& Şimşek (2023), o Ludwig \& Mullainathan (2024). \\
+\textbf{Aplicación en R:} sobre los modelos de la sesión 6: importancia por permutación vs.\ impureza (\texttt{DALEX}), PDP/ICE, SHAP (\texttt{shapviz}), jerarquía de bloques y error por decil; reproducción de las figuras 3, 5 y 6 de Gelvez et al.
+
+\subsection{Módulo 3: Redes neuronales, estructura sin $Y$ y cierre}
+
+\subsubsection{Sesión 8 --- Redes neuronales: qué son, cuándo usarlas y una aplicación con imágenes}
+\textbf{Temas:}
+\begin{itemize}
+    \item Neurona, capas y composición de funciones; funciones de activación; la pérdida.
+    \item Ajuste: SGD y \emph{mini-batches}; retropropagación como regla de la cadena; \emph{early stopping}, \emph{dropout} y \emph{weight decay}.
+    \item Cuándo \emph{deep learning} y cuándo no: datos tabulares vs.\ imágenes y texto.
+    \item Redes convolucionales como aplicación: transferencia de aprendizaje y pobreza desde imágenes satelitales.
+    \item Texto y modelos de lenguaje como lecturas complementarias.
+\end{itemize}
+\textbf{Objetivos de aprendizaje:} entender la red como composición de regresiones, ajustarla y regularizarla, y decidir con evidencia cuándo conviene frente a los árboles. \\
+\textbf{Lecturas:} ISL, cap.\ 10 (secciones 10.1--10.3 y 10.6--10.7); Jean et al.\ (2016). \\
+\textbf{Paper para presentación:} Jean, Burke, Xie, Davis, Lobell \& Ermon (2016), o Glaeser, Kincaid \& Naik (2018). \\
+\textbf{Aplicación en R:} red \emph{feedforward} (\texttt{keras}) vs.\ XGBoost sobre los mismos datos tabulares; demostración con una red convolucional preentrenada sobre imágenes satelitales.
+
+\subsubsection{Sesión 9 --- Más allá de la predicción: estructura sin $Y$, la frontera causal y presentaciones}
+\textbf{Temas:}
+\begin{itemize}
+    \item PCA como índice (Filmer--Pritchett) y $k$-means como segmentación: qué son, cómo se validan sin $Y$, advertencias.
+    \item ML al servicio de $\beta$: doble selección, \emph{double machine learning} como residuos sobre residuos con \emph{cross-fitting}, \emph{causal forests} para heterogeneidad; identificar antes de estimar.
+    \item El curso en una diapositiva.
+    \item Presentaciones de los proyectos finales.
+\end{itemize}
+\textbf{Objetivos de aprendizaje:} saber qué se puede hacer sin variable de respuesta y cuándo la predicción ayuda a estimar un efecto causal. \\
+\textbf{Lecturas:} ISL, cap.\ 12 (secciones 12.2 y 12.4); Athey \& Imbens (2019); Filmer \& Pritchett (2001). \\
+\textbf{Aplicación en R:} índice socioeconómico con PCA y segmentación con $k$-means sobre el censo por mesa; un \emph{causal forest} con \texttt{grf} como demostración de lectura.
+
+%%=================================================
+\section{Metodología}
+
+Las clases estarán organizadas en tres partes principales:
+
+\begin{enumerate}
+    \item \textbf{Exposición teórica:} para cada método el profesor sigue la misma secuencia: el problema económico que resuelve, la intuición con una figura, la formulación esencial (función objetivo e hiperparámetros), cómo funciona y cómo se ajusta, y cuándo usarlo. Intuición antes que formalismo; las derivaciones extensas van al apéndice de cada sesión.
+
+    \item \textbf{Aplicaciones guiadas:} implementación en \texttt{R} con código preparado sobre los tres conjuntos de datos del curso (mesas electorales, vivienda en Bogotá, imágenes satelitales). Cada aplicación reporta desempeño fuera de muestra frente a un modelo de referencia, gráficos de predicho vs.\ observado y, desde la sesión 6, herramientas de interpretación. Se ofrece traducción opcional a Python (\texttt{scikit-learn}).
+
+    \item \textbf{Presentación estudiantil:} al final de cada sesión, a partir de la segunda, un estudiante presentará un artículo aplicado relacionado con el tema de la sesión anterior. La presentación tendrá una duración aproximada de 15 minutos y deberá cubrir:
+    \begin{itemize}
+        \item La pregunta y qué se predice.
+        \item Los datos, el método de ML y cómo se evalúa el desempeño fuera de muestra.
+        \item Los resultados principales y cómo se interpreta el modelo.
+    \end{itemize}
+    No será necesario discutir literatura relacionada. La selección del artículo será libre dentro de la bibliografía del curso.
+\end{enumerate}
+
+\section{Otras obligaciones de los estudiantes}
+
+Cada estudiante deberá realizar de manera autónoma una nivelación en \texttt{R} antes de las sesiones aplicadas. Para ello se proporcionará el siguiente material de referencia:
+
+\begin{itemize}
+    \item Introducción a \texttt{R}.
+    \item Manipulación de datos con \texttt{dplyr}.
+    \item Visualización de datos con \texttt{ggplot2}.
+    \item Buenas prácticas de modelamiento con \texttt{tidymodels}.
+\end{itemize}
+
+La revisión de este material es obligatoria y se desarrolla por fuera del horario de clase. Para quienes opten por la vía Python se ofrece material equivalente de referencia.
+
+%%=================================================
+\section{Evaluación}
+
+La calificación final del curso se basa en cuatro componentes:
+
+\begin{enumerate}
+    \item \textbf{Presentación de un artículo (10\%)} \\
+    A partir de la segunda sesión, al final de cada clase un estudiante presentará uno de los artículos de la bibliografía relacionados con la sesión anterior, durante 15 minutos, cubriendo la pregunta, los datos y el método, la evaluación fuera de muestra y la interpretación de los resultados. Cada sesión contará con una presentación distinta.
+
+    \item \textbf{Problem Set 1: Fundamentos, evaluación y regularización (15\%)} \\
+    Taller extra clase a desarrollar en parejas sobre el material de las sesiones 1 a 5. Combina preguntas conceptuales cortas (por qué el error de entrenamiento es optimista, qué cambia al pasar de OLS a Lasso, qué métrica usar y por qué) con un \emph{pipeline} predictivo completo en \texttt{R}: partición, validación cruzada, comparación de modelos frente a un modelo de referencia y diagnóstico de errores. Se entrega como un único archivo \texttt{.pdf} acompañado de un repositorio reproducible (\texttt{.R}).
+
+    \item \textbf{Problem Set 2: Árboles, interpretación y redes (15\%)} \\
+    Taller extra clase en parejas sobre el material de las sesiones 6 a 9, con la misma estructura: preguntas conceptuales y un \emph{pipeline} con \emph{random forest} o \emph{boosting} y redes neuronales, evaluación fuera de muestra e interpretación con importancia de variables, dependencia parcial y SHAP.
+
+    \item \textbf{Proyecto final con defensa (60\%)} \\
+    En grupos de 2--3 estudiantes. El equipo define una pregunta económica en la que la predicción es la cantidad de interés, identifica un conjunto de datos, aplica varios algoritmos y evalúa e interpreta su desempeño fuera de muestra. La distribución interna del componente es:
+    \begin{itemize}
+        \item \textbf{Entrega 1 --- Propuesta (10\% del proyecto):} pregunta, datos, métrica objetivo, modelo de referencia y estrategia de validación.
+        \item \textbf{Entrega 2 --- Reporte (60\% del proyecto):} documento de máximo 10 páginas con comparación de modelos, diagnósticos, interpretación y limitaciones, acompañado del repositorio reproducible.
+        \item \textbf{Defensa oral (30\% del proyecto):} presentación en la última sesión, discutiendo la pertinencia de los métodos y sus implicaciones de política.
+    \end{itemize}
+    Detalle completo en el documento \texttt{proyecto\_final.pdf}.
+\end{enumerate}
+
+\noindent \textbf{Resumen de la evaluación:}
+\begin{itemize}
+    \item Presentación de artículo: 10\%
+    \item Problem Set 1 (sesiones 1--5): 15\%
+    \item Problem Set 2 (sesiones 6--9): 15\%
+    \item Proyecto final con defensa: 60\%
+\end{itemize}
+
+\noindent \textbf{Nota sobre el uso de IA:} Se permite el uso de herramientas de IA en cualquier componente del curso, siempre que se declare explícitamente qué se usó y para qué.
+
+%%=================================================
+\section{Bibliografía}
+
+\subsection*{Textos base}
+\begin{itemize}
+    \item James, G., Witten, D., Hastie, T., \& Tibshirani, R.\ (2021). \textit{An Introduction to Statistical Learning with Applications in R} (2.ª ed.). Springer. [ISL] \href{https://www.statlearning.com}{[disponible online]}
+    \item Molnar, C.\ (2025). \textit{Interpretable Machine Learning: A Guide for Making Black Box Models Explainable} (3.ª ed.). \href{https://christophm.github.io/interpretable-ml-book/}{[disponible online]}
+    \item Hastie, T., Tibshirani, R., \& Friedman, J.\ (2009). \textit{The Elements of Statistical Learning} (2.ª ed.). Springer. [ESL]
+    \item Goodfellow, I., Bengio, Y., \& Courville, A.\ (2016). \textit{Deep Learning}. MIT Press.
+\end{itemize}
+
+\subsection*{Marco general: ML en economía}
+\begin{itemize}
+    \item Mullainathan, S., \& Spiess, J.\ (2017). Machine Learning: An Applied Econometric Approach. \textit{Journal of Economic Perspectives}, 31(2), 87--106.
+    \item Varian, H.\ R.\ (2014). Big Data: New Tricks for Econometrics. \textit{Journal of Economic Perspectives}, 28(2), 3--28.
+    \item Kleinberg, J., Ludwig, J., Mullainathan, S., \& Obermeyer, Z.\ (2015). Prediction Policy Problems. \textit{American Economic Review: Papers \& Proceedings}, 105(5), 491--495.
+    \item Athey, S., \& Imbens, G.\ W.\ (2019). Machine Learning Methods That Economists Should Know About. \textit{Annual Review of Economics}, 11, 685--725.
+    \item Shmueli, G.\ (2010). To Explain or to Predict? \textit{Statistical Science}, 25(3), 289--310.
+    \item Kim, S.-y.\ S., \& Zilinsky, J.\ (2024). Division Does Not Imply Predictability: Demographics Continue to Reveal Little About Voting and Partisanship. \textit{Political Behavior}, 46, 67--87.
+    \item Gelvez, J.\ D., Cardiles, A., Martínez-González, E.\ F., \& Muñoz, M.\ (2026). How Predictable Is an Election? A Machine-Learning Approach to Electoral Behavior in Colombia. Documento de trabajo.
+\end{itemize}
+
+\subsection*{Regresión, clasificación y evaluación (sesiones 2--4)}
+\begin{itemize}
+    \item Bogin, A.\ N., \& Shui, J.\ (2020). Appraisal Accuracy and Automated Valuation Models in Rural Areas. \textit{Journal of Real Estate Finance and Economics}, 60, 40--52.
+    \item Pace, R.\ K., \& Hayunga, D.\ K.\ (2020). Examining the Information Content of Residuals from Hedonic and Spatial Models Using Trees and Forests. \textit{Journal of Real Estate Finance and Economics}, 60, 170--180.
+    \item Kleinberg, J., Lakkaraju, H., Leskovec, J., Ludwig, J., \& Mullainathan, S.\ (2018). Human Decisions and Machine Predictions. \textit{Quarterly Journal of Economics}, 133(1), 237--293.
+    \item Fuster, A., Goldsmith-Pinkham, P., Ramadorai, T., \& Walther, A.\ (2022). Predictably Unequal? The Effects of Machine Learning on Credit Markets. \textit{Journal of Finance}, 77(1), 5--47.
+    \item Fawcett, T.\ (2006). An Introduction to ROC Analysis. \textit{Pattern Recognition Letters}, 27(8), 861--874.
+    \item Roberts, D.\ R., et al.\ (2017). Cross-validation Strategies for Data with Temporal, Spatial, Hierarchical, or Phylogenetic Structure. \textit{Ecography}, 40(8), 913--929.
+    \item Neunhoeffer, M., \& Sternberg, S.\ (2019). How Cross-Validation Can Go Wrong and What to Do About It. \textit{Political Analysis}, 27(1), 101--106.
+    \item Deppner, J., \& Cajias, M.\ (2024). Accounting for Spatial Autocorrelation in Algorithm-Driven Hedonic Models: A Spatial Cross-Validation Approach. \textit{Journal of Real Estate Finance and Economics}, 68, 235--273.
+    \item Goulet Coulombe, P., Leroux, M., Stevanovic, D., \& Surprenant, S.\ (2022). How Is Machine Learning Useful for Macroeconomic Forecasting? \textit{Journal of Applied Econometrics}, 37(5), 920--964.
+\end{itemize}
+
+\subsection*{Regularización (sesión 5)}
+\begin{itemize}
+    \item Gu, S., Kelly, B., \& Xiu, D.\ (2020). Empirical Asset Pricing via Machine Learning. \textit{Review of Financial Studies}, 33(5), 2223--2273.
+    \item Blumenstock, J., Cadamuro, G., \& On, R.\ (2015). Predicting Poverty and Wealth from Mobile Phone Metadata. \textit{Science}, 350(6264), 1073--1076.
+    \item Belloni, A., Chernozhukov, V., \& Hansen, C.\ (2014). High-Dimensional Methods and Inference on Structural and Treatment Effects. \textit{Journal of Economic Perspectives}, 28(2), 29--50.
+    \item Tibshirani, R.\ (1996). Regression Shrinkage and Selection via the Lasso. \textit{Journal of the Royal Statistical Society: Series B}, 58(1), 267--288.
+\end{itemize}
+
+\subsection*{Árboles, ensambles e interpretación (sesiones 6--7)}
+\begin{itemize}
+    \item Breiman, L.\ (2001). Random Forests. \textit{Machine Learning}, 45(1), 5--32.
+    \item Chen, T., \& Guestrin, C.\ (2016). XGBoost: A Scalable Tree Boosting System. \textit{Proceedings of KDD '16}, 785--794.
+    \item Medeiros, M.\ C., Vasconcelos, G.\ F.\ R., Veiga, Á., \& Zilberman, E.\ (2021). Forecasting Inflation in a Data-Rich Environment: The Benefits of Machine Learning Methods. \textit{Journal of Business \& Economic Statistics}, 39(1), 98--119.
+    \item Bertrand, M., \& Kamenica, E.\ (2023). Coming Apart? Cultural Distances in the United States over Time. \textit{American Economic Journal: Applied Economics}, 15(4), 1--45.
+    \item Lundberg, S.\ M., \& Lee, S.-I.\ (2017). A Unified Approach to Interpreting Model Predictions. \textit{Advances in Neural Information Processing Systems}, 30.
+    \item Strobl, C., Boulesteix, A.-L., Zeileis, A., \& Hothorn, T.\ (2007). Bias in Random Forest Variable Importance Measures. \textit{BMC Bioinformatics}, 8, 25.
+    \item Apley, D.\ W., \& Zhu, J.\ (2020). Visualizing the Effects of Predictor Variables in Black Box Supervised Learning Models. \textit{Journal of the Royal Statistical Society: Series B}, 82(4), 1059--1086.
+    \item Bluwstein, K., Buckmann, M., Joseph, A., Kapadia, S., \& Şimşek, Ö.\ (2023). Credit Growth, the Yield Curve and Financial Crisis Prediction: Evidence from a Machine Learning Approach. \textit{Journal of International Economics}, 145, 103773.
+    \item Ludwig, J., \& Mullainathan, S.\ (2024). Machine Learning as a Tool for Hypothesis Generation. \textit{Quarterly Journal of Economics}, 139(2), 751--827.
+    \item Rudin, C.\ (2019). Stop Explaining Black Box Machine Learning Models for High Stakes Decisions and Use Interpretable Models Instead. \textit{Nature Machine Intelligence}, 1, 206--215.
+\end{itemize}
+
+\subsection*{Redes neuronales, estructura sin $Y$ y frontera causal (sesiones 8--9)}
+\begin{itemize}
+    \item Jean, N., Burke, M., Xie, M., Davis, W.\ M., Lobell, D.\ B., \& Ermon, S.\ (2016). Combining Satellite Imagery and Machine Learning to Predict Poverty. \textit{Science}, 353(6301), 790--794.
+    \item Glaeser, E.\ L., Kincaid, M.\ S., \& Naik, N.\ (2018). Computer Vision and Real Estate: Do Looks Matter and Do Incentives Determine Looks. NBER Working Paper 25174.
+    \item Dell, M.\ (2025). Deep Learning for Economists. \textit{Journal of Economic Literature}, 63(1), 5--58.
+    \item Filmer, D., \& Pritchett, L.\ (2001). Estimating Wealth Effects Without Expenditure Data --- or Tears. \textit{Demography}, 38(1), 115--132.
+    \item Chernozhukov, V., Chetverikov, D., Demirer, M., Duflo, E., Hansen, C., Newey, W., \& Robins, J.\ (2018). Double/Debiased Machine Learning for Treatment and Structural Parameters. \textit{Econometrics Journal}, 21(1), C1--C68.
+    \item Wager, S., \& Athey, S.\ (2018). Estimation and Inference of Heterogeneous Treatment Effects using Random Forests. \textit{Journal of the American Statistical Association}, 113(523), 1228--1242.
+    \item Davis, J., \& Heller, S.\ B.\ (2020). Rethinking the Benefits of Youth Employment Programs: The Heterogeneous Effects of Summer Jobs. \textit{Review of Economics and Statistics}, 102(4), 664--677.
+\end{itemize}
+
+\end{document}

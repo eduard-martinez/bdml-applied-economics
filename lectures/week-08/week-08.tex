@@ -1,0 +1,817 @@
+\documentclass{beamer}
+
+%% Tema y configuraciones
+\usetheme{Boadilla}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=.,      % color de enlaces internos (índices, refs)
+    urlcolor=blue,    % color de URLs
+    citecolor=.,      % color de referencias bibliográficas
+}
+
+%% Helpers (macros y notación)
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\1}{\mathbb{I}}
+\newcommand{\MSE}{\mathrm{MSE}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+%% Encabezado
+\title[BDML]{Big Data y Machine Learning \\ para Economía Aplicada}
+\subtitle{Week 08: Redes neuronales: qué son, cuándo usarlas y una aplicación con imágenes}
+\author{Eduard F. Martinez Gonzalez, Ph.D.}
+\institute[]{Departamento de Economía, Universidad Icesi}
+\date{\today}
+
+%%=================================================
+%% Begin document
+\begin{document}
+
+%%=================================================
+%% Primer slide
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%=================================================
+\begin{frame}{Previously\ldots}
+\small
+\begin{itemize}\itemsep4pt
+  \item \textbf{Los ensambles de árboles} ganan en datos tabulares: encuentran solos las no linealidades y las interacciones. Y la sesión 7 nos dio el kit para \textbf{abrir cualquier caja}: importancia por permutación, PDP y ALE, SHAP, con sus tres ``no''. \pause
+  \item Dos hilos que hoy convergen: el \textbf{gradiente} como motor de aprendizaje (el \emph{boosting} de la sesión 6, la verosimilitud de la sesión 3) y la \textbf{regularización} como precio de la flexibilidad (sesión 5). \pause
+  \item Y una frontera marcada: los árboles pierden cuando la estructura está en la \emph{representación} (imágenes, texto). Ahí no hay columnas que cortar.
+\end{itemize}
+\pause
+\begin{block}{Hoy}
+\textbf{Redes neuronales}: una composición de regresiones que aprende sus propias variables derivadas; se entrena con gradiente y \textbf{retropropagación}; se regulariza con el kit de siempre. Cuándo conviene frente a los árboles, con evidencia y no con fama. Y la aplicación: \textbf{pobreza y riqueza desde imágenes satelitales} con una red convolucional preentrenada. Al final, la presentación estudiantil del paper de la sesión 7.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 1: QUÉ ES UNA RED
+%%#################################################
+%%#################################################
+\section{Qué es una red neuronal}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{El problema: aprender las variables, no solo los pesos}
+\small
+\begin{itemize}\itemsep3pt
+  \item Hasta hoy las variables eran \textbf{columnas}: las escribimos (sesión 2), las seleccionamos (sesión 5) o el árbol las cortó (sesión 6). \pause
+  \item Una imagen satelital de $224 \times 224$ píxeles a color es un vector de 150.528 números sin significado individual; un texto es una secuencia de palabras. No hay columna que cortar ni \emph{spline} que escribir. \pause
+  \item El hilo de la sesión 5: \textbf{representar es comprimir con sentido}. PCA lo hacía linealmente y sin mirar $y$. Aquí la representación se aprende \emph{para} predecir.
+\end{itemize}
+\pause
+\vspace{0.1cm}
+\begin{block}{Pregunta para la sala}
+¿Cómo construir una máquina que fabrique sus propias variables derivadas y las use para predecir, todo en un solo ajuste?
+\end{block}
+\pause
+\textcolor{gray}{Componiendo regresiones: la salida de una capa es la entrada de la siguiente. Cada capa oculta es un conjunto de variables derivadas, aprendidas junto con los pesos que las usan. ISL 10.1 lo dice así: las activaciones son \emph{derived features}.}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La neurona: una regresión con actitud}
+\small
+La unidad básica no tiene misterio: una combinación lineal de las entradas seguida de una \textbf{función de activación} no lineal $g$,
+\[ a \;=\; g\big( w'x + b \big). \]
+\begin{center}
+\begin{tikzpicture}[scale=0.7, every node/.style={font=\scriptsize}]
+  \node[circle, draw] (x1) at (0,1.5) {$x_1$};
+  \node[circle, draw] (x2) at (0,0.5) {$x_2$};
+  \node[circle, draw] (x3) at (0,-0.5) {$x_3$};
+  \node[circle, draw, fill=blue!10, minimum size=1.0cm] (n) at (2.6,0.5) {$\Sigma \,\big|\, g$};
+  \node (out) at (4.7,0.5) {$a = g(w'x + b)$};
+  \draw[-{Stealth}] (x1) -- node[above, sloped]{$w_1$} (n);
+  \draw[-{Stealth}] (x2) -- node[above]{$w_2$} (n);
+  \draw[-{Stealth}] (x3) -- node[below, sloped]{$w_3$} (n);
+  \draw[-{Stealth}, thick] (n) -- (out);
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item Con $g$ sigmoide, una neurona \textbf{es} la regresión logística de la sesión 3. Nada nuevo todavía.
+  \item La novedad no es la neurona: es \textbf{componerlas}. \pause
+  \item Sin la no linealidad no hay negocio: componer funciones lineales da otra función lineal. $g$ es lo que hace que apilar capas agregue capacidad.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La red \emph{feedforward}: composición de capas}
+\framesubtitle{ISL 10.1--10.2}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.5, every node/.style={font=\scriptsize}]
+  \foreach \i/\y in {1/1.0, 2/0, 3/-1.0} \node[circle, draw, minimum size=0.6cm] (i\i) at (0,\y) {$x_\i$};
+  \foreach \i/\y in {1/1.5, 2/0.5, 3/-0.5, 4/-1.5} \node[circle, draw, fill=blue!10, minimum size=0.6cm] (h\i) at (2.6,\y) {};
+  \foreach \i/\y in {1/0.5, 2/-0.5} \node[circle, draw, fill=red!10, minimum size=0.6cm] (o\i) at (5.2,\y) {};
+  \foreach \i in {1,2,3} \foreach \j in {1,2,3,4} \draw[gray!60] (i\i) -- (h\j);
+  \foreach \i in {1,2,3,4} \foreach \j in {1,2} \draw[gray!60] (h\i) -- (o\j);
+  \node at (0,-2.1) {entrada $x$};
+  \node at (2.6,-2.3) {capa oculta $a^{(1)}$};
+  \node at (5.2,-2.1) {salida $\hat{y}$};
+\end{tikzpicture}
+\end{center}
+\pause
+\textbf{Capa por capa}, con $a^{(0)} = x$:
+\[ a^{(l)} = g\big( W^{(l)} a^{(l-1)} + b^{(l)} \big), \;\; l = 1, \ldots, L-1; \qquad \hat{y} = h\big( W^{(L)} a^{(L-1)} + b^{(L)} \big). \]
+\pause
+\begin{itemize}\itemsep2pt
+  \item La red \textbf{es} una composición $\hat{y} = f_L \circ \cdots \circ f_1(x)$. Profundidad $=$ cuántas funciones componemos; anchura $=$ cuántas unidades por capa.
+  \item \textbf{Parámetros:} todos los $W, b$. Una capa de $K$ unidades sobre $p$ entradas tiene $(p+1)K$ pesos; la red de ISL para dígitos (784 entradas, 256 y 128 ocultas, 10 salidas) tiene 235.146.
+  \item \textbf{Salida} $h$ según la tarea: identidad (regresión), sigmoide (binaria), \textbf{softmax} ($K$ clases, la multinomial de la sesión 3).
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Funciones de activación}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.52]
+\begin{scope}[shift={(0,0)}]
+  \draw[->] (-2.6,0) -- (2.6,0); \draw[->] (0,-0.3) -- (0,2.5);
+  \draw[dashed, gray] (-2.4,2.0) -- (2.4,2.0);
+  \draw[blue, very thick] plot[smooth] coordinates {(-2.5,0.11) (-1.5,0.36) (-0.7,0.66) (0,1.0) (0.7,1.34) (1.5,1.64) (2.5,1.89)};
+  \node[font=\footnotesize] at (0,-0.85) {sigmoide};
+\end{scope}
+\begin{scope}[shift={(6.4,1.0)}]
+  \draw[->] (-2.6,0) -- (2.6,0); \draw[->] (0,-1.4) -- (0,1.5);
+  \draw[red, very thick] plot[smooth] coordinates {(-2.5,-0.99) (-1.5,-0.91) (-1,-0.76) (-0.5,-0.46) (0,0) (0.5,0.46) (1,0.76) (1.5,0.91) (2.5,0.99)};
+  \node[font=\footnotesize] at (0,-1.85) {tanh};
+\end{scope}
+\begin{scope}[shift={(12.8,0)}]
+  \draw[->] (-2.6,0) -- (2.6,0); \draw[->] (0,-0.3) -- (0,2.5);
+  \draw[teal, very thick] (-2.4,0) -- (0,0) -- (2.2,2.2);
+  \node[font=\footnotesize] at (0,-0.85) {ReLU $= \max(0, z)$};
+\end{scope}
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Sigmoide y tanh}: elegantes, pero se \textbf{saturan}: en las colas su derivada es casi cero y, con muchas capas, el gradiente se \emph{desvanece} al multiplicarse por casi-ceros.
+  \item \textbf{ReLU}: tosca (ni siquiera es diferenciable en 0) pero no se satura en la mitad positiva, es baratísima y entrena mejor: el estándar en capas ocultas.
+  \item \textbf{Softmax} en la salida multiclase: convierte $K$ puntajes en probabilidades, $e^{z_k}/\sum_j e^{z_j}$.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Por qué apilar: aproximación universal y profundidad}
+\small
+\textbf{Teorema de aproximación universal} (Cybenko, 1989; Hornik, 1991): una red con \textbf{una} capa oculta suficientemente ancha aproxima cualquier función continua tan bien como se quiera (apéndice A4).
+\pause
+\begin{itemize}\itemsep3pt
+  \item Es una garantía de \emph{existencia}: no dice cuántas unidades (pueden ser astronómicas) ni cómo encontrar los pesos. \pause
+  \item \textbf{¿Por qué profundo y no ancho?} La composición \textbf{reutiliza}: las capas tempranas aprenden piezas que las tardías combinan. Funciones con estructura composicional se representan con muchos menos parámetros en profundidad que en anchura. \pause
+  \item Cada capa oculta es una \textbf{representación aprendida} de los datos, de cruda a abstracta. La red no solo predice: fabrica las variables con las que predice.
+\end{itemize}
+\pause
+\begin{block}{El contrato de la flexibilidad}
+Aproximarlo todo $\Rightarrow$ sobreajustarlo todo. El teorema garantiza capacidad; la generalización se compra con datos y regularización. La curva U jamás se fue.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 2: CÓMO SE AJUSTA
+%%#################################################
+%%#################################################
+\section{Cómo se ajusta: gradiente, retropropagación y regularización}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{La pérdida, y una mala noticia asumida con calma}
+\small
+\textbf{Nada nuevo en la pérdida:}
+\begin{itemize}\itemsep2pt
+  \item Regresión: $L = \frac{1}{n}\sum_i (y_i - \hat{y}_i)^2$, el MSE de siempre.
+  \item Clasificación: \emph{cross-entropy}, $-\frac{1}{n}\sum_i \sum_k y_{ik} \log \hat{p}_{ik}$: la máxima verosimilitud de la sesión 3 con signo menos.
+\end{itemize}
+\pause
+\vspace{0.1cm}
+\textbf{La mala noticia:} como función de los pesos $\theta = (W, b)$, la pérdida \textbf{no es convexa}: valles, mesetas y puntos de silla. Adiós a las garantías del Lasso.
+\pause
+\vspace{0.1cm}
+\textbf{La sorpresa empírica que sostiene el campo:} el descenso de gradiente \emph{estocástico}, sin garantía de óptimo global, encuentra sistemáticamente soluciones que generalizan bien en redes grandes. Los mínimos ``suficientemente buenos'' abundan.
+\pause
+\vspace{0.1cm}
+\begin{block}{Actitud del curso}
+Óptimo local $+$ buen protocolo (inicializaciones, monitoreo con validación, regularización) $=$ herramienta utilizable. La perfección teórica no es requisito para la utilidad práctica; la prueba honesta, sí.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Descenso de gradiente estocástico (SGD)}
+\small
+\textbf{La regla de siempre}, ahora sobre miles o millones de parámetros:
+\[ \theta \;\leftarrow\; \theta \;-\; \eta \, \nabla_\theta L(\theta). \]
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Mini-lotes}: el gradiente se calcula con 32 a 256 observaciones por paso, no con todas: ruidoso pero barato, y el ruido ayuda a escapar de valles malos. Una \textbf{época} es una pasada por los datos.
+  \item \textbf{$\eta$, la tasa de aprendizaje}: la perilla delicada. Grande diverge; chica no llega. \textbf{Adam} (Kingma \& Ba, 2015) adapta el paso por parámetro y es el \emph{default} moderno (apéndice A2).
+  \item Se entrena por épocas \textbf{monitoreando la validación}: la curva que sigue decide cuándo parar.
+\end{itemize}
+\pause
+\begin{block}{Déjà vu del \emph{boosting}}
+En la sesión 6 hicimos descenso de gradiente en el espacio de \emph{funciones}: un árbol por paso. Aquí es en el espacio de \emph{parámetros}: un mini-lote por paso. Mismo motor, distinto chasis.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Retropropagación: la regla de la cadena, administrada}
+\framesubtitle{ISL 10.7.1; la derivación completa en el apéndice A1}
+\small
+\textbf{El problema computacional:} $\nabla_\theta L$ tiene miles de componentes. ¿Cómo calcularlos sin morir?
+\pause
+\vspace{0.1cm}
+\textbf{La respuesta:} la red es una composición, así que la derivada de la pérdida respecto a \emph{cualquier} peso es un producto de derivadas locales a lo largo del camino hasta la salida. Esos productos \textbf{comparten factores}: computando de la salida hacia atrás, cada factor se calcula una sola vez y se reutiliza.
+\pause
+\begin{itemize}\itemsep3pt
+  \item Resultado: el gradiente completo cuesta lo mismo que \textbf{una pasada hacia adelante más una hacia atrás}, no una pasada por parámetro. Esa economía es lo que hace entrenables las redes grandes.
+  \item El objeto que viaja hacia atrás es el ``error'' de cada capa, $\delta^{(l)} = \partial L / \partial z^{(l)}$; en la salida, con pérdida cuadrática, $\delta^{(L)} = \hat{y} - y$: \textbf{el residuo, otra vez}. El patrón: $\delta$ de una capa $=$ ($\delta$ de la siguiente $\times$ pesos) $\odot$ derivada de la activación.
+  \item En la práctica nadie deriva a mano: \textbf{diferenciación automática} (Keras, PyTorch). Ustedes lo harán una vez con números: es material del Problem Set 2.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Regularizar redes: el kit de siempre, con otros nombres}
+\framesubtitle{ISL 10.7.2--10.7.3}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.42]
+  \draw[->] (0,0) -- (12,0) node[below, font=\scriptsize] {épocas};
+  \draw[->] (0,0) -- (0,4.4) node[above, font=\scriptsize] {pérdida};
+  \draw[gray, thick] plot[smooth] coordinates {(0.3,4.0) (1.5,2.4) (3,1.5) (5,0.95) (7,0.6) (9,0.4) (11.5,0.3)};
+  \draw[red, very thick] plot[smooth] coordinates {(0.3,4.1) (1.5,2.7) (3,1.9) (5,1.5) (6.3,1.42) (7.5,1.5) (9,1.8) (11.5,2.4)};
+  \draw[dashed] (6.3,0) -- (6.3,4.0);
+  \node[font=\scriptsize] at (6.3,4.3) {\emph{early stopping}};
+  \node[font=\scriptsize, gray] at (10.2,0.85) {entrenamiento};
+  \node[font=\scriptsize, red] at (10.3,2.8) {validación};
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep2pt
+  \item \textbf{\emph{Weight decay}} ($L_2$): penalizar $\sum \|W\|^2$: Ridge (sesión 5) con otro nombre.
+  \item \textbf{\emph{Early stopping}}: parar cuando la pérdida de validación deja de bajar: elegir el mínimo de la curva U en vivo, con las épocas como eje de complejidad. Es la perilla que \emph{siempre} se usa.
+  \item \textbf{\emph{Dropout}} (Srivastava et al., 2014): en cada paso, apagar al azar una fracción de unidades; la red no puede depender de ninguna en particular. En el fondo, un ensamble implícito: el espíritu del bosque.
+  \item \textbf{Aumentar datos}: en imágenes, rotar, recortar, reflejar. El regularizador más honesto: más variación invariante.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Los hiperparámetros de una red, en una tabla}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{lp{3.0cm}ll}
+\hline
+Perilla & Qué controla & Rango típico & Se elige por \\
+\hline
+capas y unidades & capacidad & 1--3 capas; 16--256 unid. & validación \\
+activación & no linealidad & ReLU & \emph{default} \\
+tasa de aprendizaje $\eta$ & tamaño del paso & $10^{-4}$ a $10^{-2}$ & validación \\
+tamaño del mini-lote & ruido del gradiente & 32 a 256 & fijo \\
+épocas & cuándo parar & hasta 500 & \emph{early stopping} \\
+\emph{dropout} & ensamble implícito & 0,1 a 0,5 & validación \\
+\emph{weight decay} & Ridge sobre los pesos & $10^{-5}$ a $10^{-3}$ & validación \\
+semilla & inicialización, orden de lotes & varias & se \emph{promedia} \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\begin{itemize}\itemsep2pt
+  \item \textbf{Las redes sí necesitan escala:} normalizar los predictores dentro del \emph{pipeline} (regla de oro \#3), a diferencia de los árboles.
+  \item \textbf{La semilla es un hiperparámetro que no se elige:} el mismo modelo con otra inicialización da otro resultado. Se reporta la media y la dispersión sobre varias semillas, o se promedian las redes.
+  \item La búsqueda es cara: con CV de 5 pliegues cada configuración son cinco entrenamientos. Búsqueda aleatoria (sesión 4) y pocas perillas a la vez.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 3: CUÁNDO USARLAS
+%%#################################################
+%%#################################################
+\section{Cuándo usar redes, y cuándo no}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Datos tabulares: el desafío de los árboles}
+\framesubtitle{ISL 10.6: cuando la ganancia es pequeña, gana el modelo simple}
+\small
+\begin{itemize}\itemsep3pt
+  \item \textbf{ISL 10.6:} en los salarios de \emph{Hitters}, la red y el Lasso quedan casi empatados en la prueba. La navaja de Occam: si la red no gana claramente, se usa el modelo que se entiende. \pause
+  \item \textbf{Grinsztajn, Oyallon \& Varoquaux (2022):} en 45 conjuntos tabulares de tamaño medio, los ensambles de árboles superan a las redes, incluso afinadas con presupuesto grande. Las redes prefieren funciones suaves, sufren con variables irrelevantes y dependen de la escala. \pause
+  \item \textbf{En economía:} Medeiros et al.\ (2021), el bosque gana en inflación; Gelvez et al.\ (2026), el bosque; Gu, Kelly \& Xiu (2020), redes \emph{y} árboles ganan con millones de observaciones acción--mes, y la ganancia viene de las interacciones. \pause
+\end{itemize}
+\vspace{0.05cm}
+\begin{block}{La regla práctica}
+Con $n$ de miles y columnas con sentido, XGBoost afinado es el techo razonable y la red rara vez lo supera. La red paga con \textbf{estructura} (imágenes, texto), con \textbf{escala}, o para \textbf{transferir} una representación ya aprendida.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Interpolación y doble descenso, en una diapositiva}
+\framesubtitle{ISL 10.8: la curva U tiene un segundo acto}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.42]
+  \draw[->] (0,0) -- (12.5,0) node[below, font=\scriptsize] {parámetros / $n$};
+  \draw[->] (0,0) -- (0,4.6) node[above, font=\scriptsize] {error};
+  \draw[dashed] (6,0) -- (6,4.2);
+  \node[font=\scriptsize] at (6,4.5) {umbral de interpolación};
+  \draw[gray, thick] plot[smooth] coordinates {(0.3,3.6) (1.5,2.2) (3,1.2) (4.5,0.5) (6,0.02) (8,0.02) (12,0.02)};
+  \draw[red, very thick] plot[smooth] coordinates {(0.3,3.7) (1.5,2.5) (2.8,1.9) (3.8,2.2) (5,3.2) (6,4.0) (7,2.9) (8.5,2.0) (10,1.6) (12,1.45)};
+  \node[font=\scriptsize, gray] at (9.5,0.5) {entrenamiento};
+  \node[font=\scriptsize, red] at (10.3,2.3) {prueba};
+  \node[font=\scriptsize, red] at (2.6,1.2) {la U de siempre};
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep2pt
+  \item A la izquierda del umbral, la curva U de la sesión 1. En el umbral, la red \textbf{interpola}: error de entrenamiento cero, error de prueba máximo. Más allá, con muchísimos más parámetros que datos, el error de prueba \textbf{vuelve a bajar}: entre todas las soluciones que interpolan, SGD tiende a elegir la ``más suave''.
+  \item \textbf{No es una licencia:} la regularización explícita sigue mejorando, y a las escalas de este curso (miles de mesas, decenas de columnas) trabajamos a la izquierda del umbral. Es la explicación de por qué las redes gigantes no colapsan, no una receta para sus proyectos.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 4: REDES QUE VEN
+%%#################################################
+%%#################################################
+\section{Redes convolucionales: la aplicación con imágenes}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Por qué una red densa no puede ver}
+\small
+Una imagen modesta de $200 \times 200$ píxeles a color son 120.000 entradas.
+\pause
+\begin{itemize}\itemsep3pt
+  \item Una primera capa densa de 1.000 unidades tendría \textbf{120 millones} de pesos en una sola capa: sobreajuste garantizado y cómputo absurdo. \pause
+  \item Peor: la red densa \textbf{ignora la estructura espacial}. Trata el píxel $(1,1)$ y el $(200,200)$ como si su relación fuera la de dos vecinos; si el techo se corre diez píxeles, para la red es una entrada completamente nueva. \pause
+\end{itemize}
+\vspace{0.1cm}
+\textbf{Las dos ideas que arreglan todo} (LeCun et al., 1998; ISL 10.3):
+\begin{enumerate}\itemsep3pt
+  \item \textbf{Localidad}: los patrones visuales son locales; un borde vive en una ventanita.
+  \item \textbf{Invarianza a traslación}: un borde es un borde esté donde esté, así que se usan \textbf{los mismos pesos} en toda la imagen.
+\end{enumerate}
+\pause
+Juntas se llaman \textbf{convolución}, y convierten los 120 millones de pesos en unas decenas por filtro.
+\end{frame}
+
+%%=================================================
+\begin{frame}{La convolución: un filtro que recorre la imagen}
+\framesubtitle{ISL 10.3.1--10.3.2}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.7]
+  \fill[blue!18] (0.4,0.8) rectangle (1.6,2.0);
+  \draw[step=0.4, gray] (0,0) grid (2.4,2.4);
+  \node[font=\scriptsize] at (1.2,-0.4) {imagen ($6\times6$)};
+  \fill[orange!25] (3.4,1.0) rectangle (4.6,2.2);
+  \draw[step=0.4, gray] (3.4,1.0) grid (4.6,2.2);
+  \node[font=\scriptsize, align=center] at (4.0,0.35) {filtro $3\times3$ \\ (pesos compartidos)};
+  \draw[-{Stealth}, thick] (5.2,1.5) -- (7.0,1.5);
+  \fill[blue!35] (7.8,1.2) rectangle (8.2,1.6);
+  \draw[step=0.4, gray] (7.4,0.4) grid (9.0,2.0);
+  \node[font=\scriptsize, align=center] at (8.2,-0.25) {mapa de \emph{features} \\ ($4\times4$)};
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item El filtro, una matriz pequeña de pesos, se \textbf{desliza} por la imagen; en cada posición, el producto punto ventana--filtro da un número del mapa de salida.
+  \item Cada filtro aprende a \textbf{detectar un patrón} (un borde vertical, una esquina, una textura); su mapa dice \emph{dónde} apareció. Una capa convolucional son varios filtros en paralelo (apéndice A3).
+  \item \textbf{\emph{Pooling}}: quedarse con el máximo de cada bloque $2\times2$; reduce la resolución, gana robustez a desplazamientos pequeños y abarata lo que sigue.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La arquitectura CNN y el \emph{transfer learning}}
+\framesubtitle{ISL 10.3.3--10.3.5}
+\small
+\textbf{El patrón:} $\big[$convolución $\rightarrow$ ReLU $\rightarrow$ \emph{pooling}$\big]$ varias veces $\rightarrow$ capas densas $\rightarrow$ salida. Las capas tempranas aprenden \textbf{bordes}; las medias, \textbf{texturas y partes} (techos, vías, cultivos); las tardías, \textbf{objetos y escenas}. La composición de la Parte 1, hecha visible.
+\pause
+\vspace{0.05cm}
+\textbf{El momento histórico:} AlexNet gana ImageNet (2012) por paliza: profundidad, ReLU, \emph{dropout} y GPU. Desde entonces la visión por computadora \emph{es} aprendizaje profundo.
+\pause
+\vspace{0.05cm}
+\begin{block}{\emph{Transfer learning}: el truco que nos habilita}
+Una CNN entrenada con millones de imágenes genéricas ya sabe ver bordes, texturas y partes; eso es \textbf{universal}. Receta: tomar la red preentrenada (ResNet50 en ISL 10.3.5), \textbf{congelar} sus capas y usar su penúltima capa como 2.048 \emph{variables derivadas}; encima, un Ridge o un bosque con \emph{nuestros} datos (miles, no millones). Reentrenar las últimas capas solo si sobran datos. Así se hace visión con presupuesto de economista.
+\end{block}
+\pause
+\begin{itemize}\itemsep2pt
+  \item El \emph{pipeline} de la sesión 4 no cambia: la red congelada es un paso de preprocesamiento; el Ridge se afina con CV; la prueba se usa una vez.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Jean et al.\ (2016, \emph{Science}): pobreza vista desde el cielo}
+\small
+\textbf{El problema:} en el mundo en desarrollo las encuestas de hogares son escasas, caras y poco frecuentes, justo donde más se necesita medir la pobreza.
+\pause
+\textbf{La solución} (\emph{transfer learning} doblemente inteligente):
+\begin{enumerate}\itemsep1pt
+  \item Partir de una CNN preentrenada en imágenes genéricas (ImageNet).
+  \item Reentrenarla para predecir \textbf{luces nocturnas} desde imágenes \textbf{diurnas}: un proxy conocido de actividad económica con datos de sobra, sin una sola encuesta.
+  \item En ese proceso la red aprende sola a reconocer techos, vías, cultivos, urbanización.
+  \item Usar esas \emph{features} en un Ridge para predecir el \textbf{consumo y la riqueza} de las encuestas disponibles, con CV.
+\end{enumerate}
+\pause
+\textbf{Resultado:} en cinco países africanos explica del \textbf{37\,\% al 55\,\%} de la variación del consumo local y hasta el \textbf{75\,\%} de la riqueza en activos; supera a las luces nocturnas solas.
+\pause
+\begin{block}{Por qué es la aplicación perfecta del curso}
+\emph{Transfer learning} $+$ \emph{pipeline} con CV y prueba (sesión 4) $+$ un proxy validado contra el terreno (sesión 7), para un problema de medición real.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El ecosistema: satélites, luces y política pública}
+\small
+\begin{itemize}\itemsep2pt
+  \item \textbf{Luces nocturnas como PIB local} (Henderson, Storeygard \& Weil, 2012): crecimiento donde las cuentas nacionales son débiles. En Gelvez et al.\ (2026) la luminosidad ya es una variable del bloque de infraestructura. \pause
+  \item \textbf{Riqueza a escala continental} (Yeh et al., 2020): Jean et al.\ extendido a toda África subsahariana, validado contra encuestas y en el tiempo. \pause
+  \item \textbf{Vivienda y ciudades:} Glaeser, Kincaid \& Naik (2018) predicen precios en Boston desde fotos de fachada: las imágenes añaden poco frente a la ubicación, pero superan al tasador presencial. Catastros, expansión informal, deforestación: la misma caja. \pause
+  \item \textbf{Focalización:} mapas de pobreza de alta resolución donde las encuestas no llegan (Blumenstock et al., 2015, con telefonía).
+\end{itemize}
+\pause
+\begin{block}{La advertencia de medición}
+Lo predicho es un \textbf{proxy}: hereda los sesgos de su entrenamiento (¿qué pobreza \emph{no} se ve desde arriba?) y se degrada fuera del dominio. Validar contra el terreno, con error por subgrupos, no es opcional.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 5: APLICACIÓN GUIADA
+%%#################################################
+%%#################################################
+\section{Aplicación guiada: una red contra los árboles, y una CNN que ve mesas}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Datos y preguntas}
+\small
+\textbf{Parte A, tabular:} la participación del ganador en 2022, primera vuelta, con \emph{la misma partición y la misma prueba} de la sesión 6. Una red densa (una y tres capas, con \emph{dropout}, \emph{early stopping} y varias semillas) contra OLS, el bosque y XGBoost. Métricas: RMSE, MAE, $R^2$ con intervalos.
+\pause
+\vspace{0.05cm}
+\textbf{Parte B, imágenes:} una imagen satelital diurna por mesa (el entorno censal de la sesión 3). Una ResNet50 congelada convierte cada imagen en 2.048 variables; encima, un Ridge (sesión 5) para predecir la \textbf{luminosidad nocturna} y la \textbf{proporción de estrato bajo} de la mesa. Es Jean et al.\ en pequeño.
+\pause
+\vspace{0.05cm}
+\textbf{Protocolo:} normalización dentro del \emph{pipeline}; validación por \textbf{bloques de municipio} (sesión 4) porque las imágenes vecinas se parecen; \emph{baselines}: la media, y para la luminosidad, un OLS con las variables censales. La prueba, una vez.
+\pause
+\begin{block}{Las preguntas de hoy}
+¿Le gana una red a XGBoost en una tabla de decenas de columnas? ¿Cuánta información sobre el territorio hay en una imagen, y cuánta de esa ya estaba en el censo?
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La tabla: la red contra los árboles, una misma prueba}
+\framesubtitle{Participación del ganador, 2022, primera vuelta: mesas de prueba}
+\small
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lccc}
+\hline
+Modelo & RMSE (pp) & MAE (pp) & $R^2$ de prueba \\
+\hline
+OLS, todas las características & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & 0,578 \\
+\emph{Random forest} afinado & 14,69 & 10,90 & 0,662 \\
+XGBoost afinado & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+Red densa, 1 capa (64), 5 semillas & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+Red densa, 3 capas, \emph{dropout} 0,2 & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+\hline
+\end{tabular}
+\end{center}
+{\scriptsize\textcolor{gray}{Cifras publicadas: Gelvez et al.\ (2026), Tablas 1 y 6. Las celdas en gris se calculan con el código de la sesión; para las redes se reporta la media sobre semillas y su desviación.}}
+\pause
+\vspace{0.05cm}
+\begin{itemize}\itemsep2pt
+  \item \textbf{Qué esperar:} la red bien afinada debería acercarse al bosque, no superarlo con claridad; si queda por debajo de OLS, casi siempre es la escala, la tasa de aprendizaje o parar tarde. \pause
+  \item \textbf{Qué reportar:} la dispersión entre semillas junto al intervalo \emph{bootstrap}: si son del mismo tamaño, la ``ganancia'' de una arquitectura sobre otra es ruido.
+\end{itemize}
+\pause
+\textbf{Parte B (imágenes $\rightarrow$ luminosidad):} $R^2$ de prueba de la CNN congelada $+$ Ridge, \textcolor{gray}{en clase}; \emph{baseline} censal, \textcolor{gray}{en clase}. Referencia: Jean et al.\ (2016) explican 37 a 55\,\% del consumo.
+\end{frame}
+
+%%=================================================
+\begin{frame}{Tres figuras}
+\small
+\begin{enumerate}\itemsep4pt
+  \item \textbf{Curvas de entrenamiento y validación por época}, una por semilla. Qué buscar: dónde se separa la validación del entrenamiento (ahí para el \emph{early stopping}) y cuánto difieren las semillas. Es la figura de la regularización, con datos. \pause
+  \item \textbf{Predicho vs.\ observado} en la prueba: red y bosque lado a lado. Qué buscar: la misma compresión hacia la media de la sesión 6; si la red comprime menos en las colas, es porque extrapola de forma más suave. \pause
+  \item \textbf{Lo que la CNN ve:} las diez imágenes con mayor y menor luminosidad predicha, y para una de ellas el mapa de saliencia (qué píxeles mueven la predicción). Qué buscar: techos, vías y densidad en las altas; vegetación y dispersión en las bajas. Y la advertencia de la sesión 7: la saliencia explica el modelo, no el territorio.
+\end{enumerate}
+\pause
+\begin{block}{Y una cuarta, barata}
+El error de la Parte B por municipio, en un mapa: si los fallos se agrupan, la validación aleatoria habría mentido (sesión 4).
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}[fragile]{Cómo se ve en R (I): una red densa con \texttt{keras}}
+\scriptsize
+\begin{verbatim}
+library(keras); library(tidymodels); set.seed(2026)
+rec <- recipe(share ~ ., data = train) |>
+  step_impute_mean(all_numeric_predictors()) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_normalize(all_numeric_predictors()) |> prep()  # escala
+x_tr <- bake(rec, train, all_predictors(), composition = "matrix")
+x_te <- bake(rec, test,  all_predictors(), composition = "matrix")
+red <- keras_model_sequential() |>
+  layer_dense(64, "relu", input_shape = ncol(x_tr)) |>
+  layer_dropout(0.2) |> layer_dense(32, "relu") |>
+  layer_dense(1)                             # salida lineal
+red |> compile(loss = "mse", optimizer = optimizer_adam(1e-3))
+h <- red |> fit(x_tr, train$share, epochs = 200, batch_size = 128,
+  validation_split = 0.2,                # parar con validación
+  callbacks = callback_early_stopping(patience = 15,
+                                    restore_best_weights = TRUE))
+rmse_vec(test$share, predict(red, x_te)[, 1])   # prueba, 1 vez
+\end{verbatim}
+\normalsize
+\small
+\begin{itemize}\itemsep2pt
+  \item La receta normaliza \emph{dentro} del entrenamiento; \texttt{validation\_split} aparta el 20\,\% para el \emph{early stopping}; \texttt{plot(h)} dibuja las curvas. Repetir con varias semillas y promediar.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}[fragile]{Cómo se ve en R (II): la CNN preentrenada como preprocesamiento}
+\scriptsize
+\begin{verbatim}
+base <- application_resnet50(weights = "imagenet",
+  include_top = FALSE, pooling = "avg")       # congelada
+tiles <- array(0, c(n, 224, 224, 3))         # una imagen por mesa
+for (i in seq_len(n)) tiles[i, , , ] <- image_to_array(
+  image_load(rutas[i], target_size = c(224, 224)))
+feat <- predict(base, imagenet_preprocess_input(tiles)) # n x 2048
+datos <- bind_cols(mesas_img, as_tibble(feat))
+rec_i <- recipe(luminosidad ~ ., data = datos) |>
+  step_normalize(all_numeric_predictors())
+ridge <- linear_reg(penalty = tune(), mixture = 0) |>
+  set_engine("glmnet")                # Ridge sobre 2.048 columnas
+folds <- group_vfold_cv(datos, group = municipio, v = 5)  # S4
+res <- tune_grid(workflow(rec_i, ridge), folds,
+                 grid = 30, metrics = metric_set(rmse, rsq))
+\end{verbatim}
+\normalsize
+\small
+\begin{itemize}\itemsep2pt
+  \item La red no se entrena: solo \emph{ve}. Las 2.048 columnas son las variables derivadas de la Parte 1; el Ridge y la validación por municipios son las sesiones 4 y 5 sin cambios. Si sobran datos, se descongelan las últimas capas y se reentrena con tasa de aprendizaje pequeña.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Presentación estudiantil: el paper de la sesión 7}
+\framesubtitle{Quince minutos, tres preguntas}
+\small
+Bluwstein, Buckmann, Joseph, Kapadia \& Şimşek (2023) o Ludwig \& Mullainathan (2024), a elección de quien presenta.
+\begin{enumerate}\itemsep3pt
+  \item \textbf{¿Qué se predice y por qué importa?} Crisis financieras con uno o dos años de anticipación en 17 países desde 1870; o la decisión del juez de encarcelar, a partir de la foto del acusado, como punto de partida para generar hipótesis.
+  \item \textbf{¿Con qué datos y método, y cómo se evalúa?} Qué familias comparan contra la logística; cómo validan con eventos raros y dependencia temporal; qué métrica y qué umbral fijan.
+  \item \textbf{¿Qué se encuentra y cómo se interpreta?} Qué herramienta de la sesión 7 abre la caja (Shapley; morfología de rostros con sujetos humanos) y qué afirman \emph{y qué no} a partir de ella.
+\end{enumerate}
+\pause
+\begin{block}{Para el resto de la sala}
+¿Las explicaciones se calculan fuera del entrenamiento? ¿Alguna conclusión trata una contribución de Shapley como un efecto? ¿Qué papel juega la no linealidad (crédito $\times$ curva de rendimientos) en la ganancia sobre la logística?
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 6: INTERPRETACIÓN, TEXTO Y CIERRE
+%%#################################################
+%%#################################################
+\section{Interpretación, texto como lectura y cierre}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Qué dice la red y qué no dice}
+\small
+\begin{itemize}\itemsep3pt
+  \item \textbf{Las unidades ocultas no significan nada por sí solas:} no hay coeficientes que leer. El kit de la sesión 7 sí funciona: importancia por permutación, PDP y ALE, SHAP por muestreo (KernelSHAP) o por gradientes. Todo fuera del entrenamiento y con semillas. \pause
+  \item \textbf{En imágenes, la saliencia:} qué píxeles mueven la predicción (Grad-CAM). Útil para auditar (¿mira los techos o la marca de agua de la foto?), peligrosa para narrar. \pause
+  \item \textbf{El proxy y el dominio:} un $R^2$ de 0,5 contra la encuesta es una medida de cuánto se ve desde arriba, no una licencia para reemplazar la encuesta. Fuera del país o de la década de entrenamiento, el modelo se degrada sin avisar. \pause
+  \item \textbf{La tabla decide:} si la red no le gana al bosque en la prueba, la respuesta a ``¿usamos \emph{deep learning}?'' es no, y es una buena respuesta.
+\end{itemize}
+\pause
+\begin{block}{$Y$, no $\beta$, versión redes}
+Una CNN que predice riqueza desde el cielo mide cuánta información sobre el bienestar contiene el paisaje construido. No dice que construir techos de zinc enriquezca a nadie. La frontera causal es la sesión 9.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Texto y modelos de lenguaje: la lectura complementaria}
+\framesubtitle{Fuera del núcleo del curso; para los proyectos que lo necesiten}
+\small
+\begin{itemize}\itemsep2pt
+  \item \textbf{El texto como datos} (Gentzkow, Kelly \& Taddy, 2019): contar palabras (bolsa de palabras, TF-IDF) convierte un discurso o un informe en una fila con miles de columnas; desde ahí aplica todo el curso: Lasso, bosques, PCA. \pause
+  \item \textbf{\emph{Embeddings}}: cada palabra como un vector aprendido de su contexto; el sentido como geometría. La misma idea que la penúltima capa de la CNN de hoy: una representación reutilizable. \pause
+  \item \textbf{Transformers y LLMs}: representaciones \emph{en contexto} aprendidas sobre billones de palabras. Para un economista, su uso más sólido es como \textbf{instrumento de medición} (clasificar, extraer, codificar) validado contra una muestra etiquetada a mano, con la disciplina de la sesión 7 (Dell, 2025; Korinek, 2023). \pause
+\end{itemize}
+\begin{block}{Para el proyecto}
+Si el proyecto usa texto, la regla no cambia: partición, \emph{pipeline}, \emph{baseline}, prueba una vez, interpretación con advertencias. Cambia la representación; la evaluación es idéntica.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cuándo usar qué, y qué leer}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{lp{3.8cm}p{3.9cm}}
+\hline
+ & Usar cuando & Cuidado con \\
+\hline
+Lineal regularizado & señal suave; pocos datos; hay que explicar & no ve lo que no se escribe \\
+Árboles y \emph{boosting} & tabular mediano con columnas con sentido & extrapolación; afinado del \emph{boosting} \\
+Red densa & tabular muy grande, o como comparación & escala, semillas, $\eta$; rara vez gana \\
+CNN preentrenada $+$ Ridge & imágenes con miles de etiquetas & dominio distinto a ImageNet; proxy \\
+Red desde cero & millones de ejemplos y GPU & todo lo anterior, multiplicado \\
+Texto y LLM & medir a partir de documentos & validar contra etiquetas humanas \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\textbf{Qué leer:} ISL cap.\ 10 (10.1 a 10.3 y 10.6 a 10.7; 10.8 por curiosidad); Jean et al.\ (2016) con su material suplementario, por el diseño del \emph{transfer learning}; Grinsztajn et al.\ (2022) por la evidencia tabular; Dell (2025) como mapa del \emph{deep learning} para economistas; Goodfellow, Bengio \& Courville (2016), caps.\ 6 a 9, para quien quiera el fondo.
+\end{frame}
+
+%%=================================================
+\begin{frame}{Recap}
+\small
+\begin{enumerate}\itemsep3pt
+  \item \textbf{Una red} es una composición de regresiones con activaciones no lineales; cada capa oculta es un conjunto de variables derivadas aprendidas para predecir. Aproxima todo; por eso sobreajusta todo.
+  \item \textbf{Se entrena} con SGD por mini-lotes (Adam) sobre una pérdida no convexa que en la práctica se deja optimizar; la \textbf{retropropagación} es la regla de la cadena con reutilización: el gradiente cuesta una ida y una vuelta.
+  \item \textbf{Se regulariza} con el kit de siempre: \emph{weight decay} (Ridge), \emph{early stopping} (la U en vivo), \emph{dropout} (ensamble implícito), más datos. Escala dentro del \emph{pipeline}; semillas promediadas.
+  \item \textbf{Cuándo:} en tabular mediano los árboles ganan o empatan (Grinsztajn et al.; ISL 10.6); la red paga con estructura, escala o representaciones transferibles.
+  \item \textbf{CNN}: localidad y pesos compartidos; bordes $\rightarrow$ partes $\rightarrow$ objetos; \textbf{\emph{transfer learning}} convierte la visión en un paso de preprocesamiento. Jean et al.: 37 a 55\,\% del consumo desde el cielo, con un proxy que hay que validar.
+  \item \textbf{La tabla decide}, también aquí: misma partición, misma prueba, intervalos y semillas.
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}
+\vspace{2.0cm}
+\Large{Preparación para la próxima clase\ldots}
+\end{frame}
+
+%%#################################################
+%%#################################################
+%% PARTE 7: PRÓXIMA CLASE
+%%#################################################
+%%#################################################
+
+%%=================================================
+\begin{frame}{Para aprovechar al máximo la próxima sesión}
+\small
+\textbf{Lecturas obligatorias de esta semana:}
+\begin{itemize}\itemsep2pt
+  \item ISL, cap.\ 10, secciones 10.1 a 10.3 y 10.6 a 10.7. \\ \textcolor{gray}{Guía: 10.1 y 10.2 son la Parte 1; 10.7 es la Parte 2; 10.3.5 es la ResNet de la aplicación.}
+  \item Jean et al.\ (2016), \emph{Combining Satellite Imagery and Machine Learning to Predict Poverty}, \emph{Science}. \\ \textcolor{gray}{Guía: es corto; concéntrense en la figura 1 y en el diseño en dos etapas.}
+\end{itemize}
+\textbf{Para la presentación estudiantil de la sesión 9:} Jean et al.\ (2016) o Glaeser, Kincaid \& Naik (2018), \emph{Computer Vision and Real Estate}, NBER WP 25174.
+\pause
+\textbf{Próxima sesión, la última:} estructura sin $Y$ (PCA como índice y $k$-means como segmentación, y cómo se validan sin variable de respuesta); la frontera causal (doble selección, \emph{double machine learning}, \emph{causal forests}: cuándo la predicción ayuda a estimar un $\beta$); el curso en una diapositiva; y las \textbf{presentaciones de los proyectos}. Lectura previa: ISL 12.2 y 12.4; Athey \& Imbens (2019).
+\pause
+\textbf{Aplicación de esta semana en R:} la red densa contra los árboles en la misma prueba, con semillas; la CNN preentrenada sobre las imágenes de las mesas, con validación por municipios.
+\end{frame}
+
+%%=================================================
+%% Referencias
+\begin{frame}{Referencias esenciales}
+\scriptsize
+\begin{itemize}\itemsep0pt
+  \item James, G., Witten, D., Hastie, T., \& Tibshirani, R. (2021). \emph{An Introduction to Statistical Learning} (2.\ ed.). Springer. Cap.\ 10. [ISL]
+  \item Goodfellow, I., Bengio, Y., \& Courville, A. (2016). \emph{Deep Learning}. MIT Press. Caps.\ 6--9.
+  \item LeCun, Y., Bengio, Y., \& Hinton, G. (2015). Deep Learning. \emph{Nature}, 521, 436--444.
+  \item Kingma, D., \& Ba, J. (2015). Adam: A Method for Stochastic Optimization. \emph{ICLR}.
+  \item Srivastava, N., et al.\ (2014). Dropout: A Simple Way to Prevent Neural Networks from Overfitting. \emph{JMLR}, 15, 1929--1958.
+  \item Grinsztajn, L., Oyallon, E., \& Varoquaux, G. (2022). Why Do Tree-Based Models Still Outperform Deep Learning on Typical Tabular Data? \emph{NeurIPS Datasets and Benchmarks}.
+  \item Jean, N., Burke, M., Xie, M., Davis, W., Lobell, D., \& Ermon, S. (2016). Combining Satellite Imagery and Machine Learning to Predict Poverty. \emph{Science}, 353(6301), 790--794.
+  \item Yeh, C., et al.\ (2020). Using Publicly Available Satellite Imagery and Deep Learning to Understand Economic Well-Being in Africa. \emph{Nature Communications}, 11, 2583.
+  \item Henderson, V., Storeygard, A., \& Weil, D. (2012). Measuring Economic Growth from Outer Space. \emph{AER}, 102(2), 994--1028.
+  \item Glaeser, E., Kincaid, M., \& Naik, N. (2018). Computer Vision and Real Estate. NBER Working Paper 25174.
+  \item Gentzkow, M., Kelly, B., \& Taddy, M. (2019). Text as Data. \emph{Journal of Economic Literature}, 57(3), 535--574.
+  \item Dell, M. (2025). Deep Learning for Economists. \emph{Journal of Economic Literature}, 63(1), 5--58.
+  \item Bluwstein, K., et al.\ (2023). Credit Growth, the Yield Curve and Financial Crisis Prediction. \emph{Journal of International Economics}, 145, 103773.
+  \item Ludwig, J., \& Mullainathan, S. (2024). Machine Learning as a Tool for Hypothesis Generation. \emph{QJE}, 139(2), 751--827.
+\end{itemize}
+\normalsize
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% APÉNDICE: PARA PROFUNDIZAR
+%%#################################################
+%%#################################################
+\appendix
+\section{Apéndice: para profundizar}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{A1. Retropropagación: derivación con una capa oculta}
+\small
+\textbf{Setup} (regresión, pérdida cuadrática de una observación):
+\[ z = W^{(1)} x + b^{(1)}, \quad h = g(z), \quad \hat{y} = w^{(2)\prime} h + b^{(2)}, \quad L = \tfrac{1}{2}\big(\hat{y} - y\big)^2. \]
+\pause
+\textbf{1. Capa de salida} (primer eslabón de la cadena):
+\[ \delta^{(2)} \;=\; \frac{\partial L}{\partial \hat{y}} \;=\; \hat{y} - y \qquad \text{(el residuo)}. \]
+\pause
+\textbf{2. Gradientes de la capa de salida:}
+\[ \frac{\partial L}{\partial w^{(2)}} = \delta^{(2)}\, h, \qquad \frac{\partial L}{\partial b^{(2)}} = \delta^{(2)}. \]
+\pause
+\textbf{3. Propagar el error hacia atrás} (por cada unidad oculta, la cadena pasa por $\hat{y}$ y por $g$):
+\[ \delta^{(1)} \;=\; \big( w^{(2)} \, \delta^{(2)} \big) \odot g'(z). \]
+\pause
+\textbf{4. Gradientes de la capa oculta:}
+\[ \frac{\partial L}{\partial W^{(1)}} = \delta^{(1)} x', \qquad \frac{\partial L}{\partial b^{(1)}} = \delta^{(1)}. \]
+\pause
+\textcolor{gray}{Con ReLU, $g'(z) = \1\{z > 0\}$: el error solo fluye por las unidades activas. Con más capas, el paso 3 se repite capa por capa. Un paso con números es material del Problem Set 2.}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A2. Momento y Adam}
+\small
+El SGD puro oscila en valles estrechos y avanza despacio en mesetas. Dos remedios que se combinan:
+\pause
+\textbf{Momento:} acumular una media móvil del gradiente y moverse en su dirección,
+\[ m_t = \beta_1\, m_{t-1} + (1 - \beta_1)\, g_t, \qquad \theta_t = \theta_{t-1} - \eta\, m_t. \]
+\pause
+\textbf{Adam} (Kingma \& Ba, 2015): además, una media móvil del gradiente al cuadrado para \emph{escalar} el paso de cada parámetro por su propia volatilidad,
+\[ v_t = \beta_2\, v_{t-1} + (1 - \beta_2)\, g_t^2, \qquad \hat{m}_t = \frac{m_t}{1 - \beta_1^t}, \quad \hat{v}_t = \frac{v_t}{1 - \beta_2^t}, \]
+\[ \theta_t = \theta_{t-1} - \eta\, \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}. \]
+\pause
+\begin{itemize}\itemsep2pt
+  \item Los \emph{defaults} $\beta_1 = 0{,}9$, $\beta_2 = 0{,}999$, $\epsilon = 10^{-8}$ casi nunca se tocan; $\eta \approx 10^{-3}$ es el punto de partida. Las correcciones $1 - \beta^t$ compensan que $m_0 = v_0 = 0$.
+  \item Parámetros con gradientes grandes reciben pasos chicos y viceversa: una estandarización implícita del paisaje. Adam tolera predictores mal escalados mejor que SGD, pero no tan bien como normalizar. AdamW resta el \emph{weight decay} aparte del gradiente.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A3. La aritmética de una capa convolucional}
+\small
+\textbf{Tamaño de salida.} Una imagen de $n \times n$, un filtro de $k \times k$, relleno (\emph{padding}) $p$ y paso (\emph{stride}) $s$ producen un mapa de
+\[ \left\lfloor \frac{n + 2p - k}{s} \right\rfloor + 1 \;\times\; \left\lfloor \frac{n + 2p - k}{s} \right\rfloor + 1. \]
+Con $224 \times 224$, $k = 3$, $p = 1$, $s = 1$: $224 \times 224$. Un \emph{pooling} $2 \times 2$ lo baja a $112 \times 112$.
+\pause
+\vspace{0.05cm}
+\textbf{Parámetros.} Una capa con $F$ filtros de $k \times k$ sobre una entrada con $C$ canales tiene $F\,(k^2 C + 1)$ pesos, \emph{independientemente del tamaño de la imagen}. Sesenta y cuatro filtros $3 \times 3$ sobre RGB: $64 \times (27 + 1) = 1.792$. La capa densa equivalente sobre $224 \times 224 \times 3$ entradas y 64 salidas tendría $64 \times 150.529 \approx 9{,}6$ millones.
+\pause
+\vspace{0.05cm}
+\textbf{Cómputo.} Cada posición del mapa cuesta $k^2 C$ multiplicaciones; la capa completa, $F \cdot k^2 C \cdot (\text{posiciones})$. Los pesos son pocos; las operaciones, muchas: por eso las GPU.
+\pause
+\begin{itemize}\itemsep2pt
+  \item \textbf{ResNet50}: unos 25 millones de parámetros y 50 capas con ``atajos'' que suman la entrada de un bloque a su salida, lo que permite entrenar redes profundas sin que el gradiente se desvanezca. Su penúltima capa, tras el \emph{pooling} global, tiene 2.048 números por imagen: las variables derivadas de la aplicación.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A4. Aproximación universal: qué dice y qué no}
+\small
+\textbf{Enunciado} (Cybenko, 1989; Hornik, 1991). Sea $g$ una función de activación no polinómica (sigmoide, ReLU). Para toda función continua $f$ sobre un compacto de $\mathbb{R}^p$ y todo $\varepsilon > 0$ existen $K$ y pesos tales que
+\[ \sup_{x} \Big| f(x) - \sum_{k=1}^{K} \beta_k\, g\big(w_k' x + b_k\big) \Big| < \varepsilon. \]
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Es un resultado de densidad}, como el de Weierstrass para polinomios. No dice cuántas unidades ($K$ puede crecer exponencialmente con $p$ y $1/\varepsilon$), ni que SGD las encuentre, ni nada sobre generalización.
+  \item \textbf{Profundidad:} hay funciones que una red profunda representa con $O(p)$ unidades y una red de una capa necesita $O(2^p)$ (Telgarsky, 2016): la composición reutiliza piezas. Es la razón teórica de ``profundo y no ancho'', y coincide con lo que se ve en las CNN.
+  \item \textbf{La analogía con la sesión 2:} los \emph{splines} también aproximan cualquier función suave; la red aprende \emph{dónde} poner los nodos ($w_k, b_k$) y en qué combinaciones de variables. Con $p$ grande, esa es la diferencia entre lo posible y lo imposible.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+%% End document
+\end{document}

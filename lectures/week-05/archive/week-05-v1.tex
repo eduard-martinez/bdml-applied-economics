@@ -1,0 +1,537 @@
+\documentclass{beamer}
+
+%% Tema y configuraciones
+\usetheme{Boadilla}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=.,      % color de enlaces internos (índices, refs)
+    urlcolor=blue,    % color de URLs
+    citecolor=.,      % color de referencias bibliográficas
+}
+
+%% Helpers (macros y notación)
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\1}{\mathbb{I}}
+\newcommand{\MSE}{\mathrm{MSE}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+%% Encabezado
+\title[BDML]{Big Data y Machine Learning \\ para Economía Aplicada}
+\subtitle{Week 05: Clasificación y Métricas de Desempeño}
+\author{Eduard F. Martinez Gonzalez, Ph.D.}
+\institute[]{Departamento de Economía, Universidad Icesi}
+\date{\today}
+
+%%=================================================
+%% Begin document
+\begin{document}
+
+%%=================================================
+%% Primer slide
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%=================================================
+\begin{frame}{Previously\ldots}
+\small
+\begin{itemize}\itemsep5pt
+  \item Cerramos el arco de la \textbf{regresión}: modelos lineales regularizados (S2--S3) y ensambles de árboles (S4), todos evaluados con validación cruzada sobre el mismo esqueleto de pipeline.
+  \item Quedó una semilla sembrada: el \emph{gradient boosting} con pérdida logística ajusta árboles a $y_i - \hat{p}_i$\ldots\ hoy sabremos de dónde sale ese residuo.
+\end{itemize}
+\pause
+
+\vspace{0.2cm}
+\begin{block}{Hoy: $y$ es una categoría}
+¿Impaga o no? ¿Pobre o no pobre? ¿Compra o no compra? Cambian tres cosas:
+\begin{enumerate}\itemsep2pt
+  \item La \textbf{pérdida} (el MSE ya no es la métrica natural).
+  \item Los \textbf{métodos} (logística, $k$-NN, LDA/NB, SVM --- y los árboles de la semana pasada, que ya clasificaban).
+  \item Y sobre todo la \textbf{evaluación}: con clases desbalanceadas y errores de costo asimétrico, elegir la métrica y el umbral \emph{es} la decisión económica.
+\end{enumerate}
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 1: EL PROBLEMA DE CLASIFICACIÓN
+%%#################################################
+%%#################################################
+\section{El problema de clasificación}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Setup, y por qué no usar OLS}
+\small
+\textbf{Ahora} $y \in \{0, 1\}$ (o $K$ clases). Queremos dos objetos, relacionados pero distintos:
+\begin{itemize}\itemsep3pt
+  \item La \textbf{probabilidad} $p(x) = P(y = 1 \mid X = x)$.
+  \item Una \textbf{regla de decisión} $\hat{y}(x) \in \{0,1\}$ (que veremos, requiere además un \emph{umbral}).
+\end{itemize}
+\pause
+
+\vspace{0.15cm}
+\textbf{¿Y si le tiramos OLS a la dummy?} (el ``modelo de probabilidad lineal'')
+\begin{itemize}\itemsep4pt
+  \item Predicciones fuera de $[0,1]$: probabilidades de $-0.2$ o $1.3$ no sirven para \textbf{decidir} con umbrales.
+  \item Con $K > 2$ clases codificadas $1, 2, 3$: impone un orden y distancias que no existen. \pause
+  \item \textbf{Nota de honestidad econométrica:} para estimar \emph{efectos marginales promedio}, el LPM es legítimo y ustedes lo usan. Pero nuestro objetivo hoy es otro: \textbf{probabilidades bien calibradas para clasificar y decidir}. Objetivos distintos, herramientas distintas.
+\end{itemize}
+\pause
+
+\begin{block}{El plan}
+Primero el clasificador ideal (Bayes), luego los métodos que lo aproximan, y después --- lo más importante en la práctica --- cómo evaluarlos y convertirlos en decisiones.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El clasificador de Bayes: el ideal inalcanzable}
+\small
+Si conociéramos las probabilidades verdaderas, la regla óptima (minimiza la tasa de error) es obvia:
+\[ \hat{y}^{Bayes}(x) \;=\; \argmax_{k} \; P(y = k \mid X = x) \]
+asignar cada $x$ a su clase \textbf{más probable}.
+\pause
+
+\vspace{0.2cm}
+\begin{itemize}\itemsep5pt
+  \item \textbf{Frontera de Bayes:} el conjunto donde hay empate ($p(x) = 0.5$ en el caso binario); a un lado se predice 1, al otro 0.
+  \item \textbf{Error de Bayes:} el error de esta regla ideal. Es $> 0$ siempre que las clases se \emph{traslapen}: individuos idénticos en $X$ con resultados distintos. \pause
+  \item ¿Les suena? Es el \textbf{análogo exacto del $\sigma^2$ irreducible} de la sesión 1: el piso que ningún método puede perforar. Si el error de Bayes es 20\%, exigirle 95\% de acierto a un modelo es pedirle magia. \pause
+\end{itemize}
+
+\vspace{0.1cm}
+\begin{block}{Todo lo que sigue, en una frase}
+Cada clasificador es una manera distinta de \textbf{estimar} $P(y \mid X)$ --- o directamente la frontera --- a partir de datos.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 2: LOS CLASIFICADORES
+%%#################################################
+%%#################################################
+\section{Los clasificadores}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Regresión logística: el modelo}
+\small
+Modelar la probabilidad con una función que \textbf{viva en $[0,1]$}:
+\[ p(x) \;=\; \frac{e^{x'\beta}}{1 + e^{x'\beta}} \qquad \Longleftrightarrow \qquad \underbrace{\log \frac{p(x)}{1 - p(x)}}_{\text{log-odds}} \;=\; x'\beta \]
+
+\vspace{0.1cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.82]
+  \draw[->] (-4.1,0) -- (4.3,0) node[right, font=\scriptsize] {$x'\beta$};
+  \draw[->] (0,-0.15) -- (0,3.4) node[above, font=\scriptsize] {$p(x)$};
+  \draw[dashed, gray] (-4,1.5) -- (4,1.5);
+  \node[font=\scriptsize, gray] at (-4.35,1.5) {$0.5$};
+  \draw[dashed, gray] (-4,3.0) -- (4,3.0);
+  \node[font=\scriptsize, gray] at (-4.3,3.0) {$1$};
+  \draw[blue, very thick] plot[smooth] coordinates {(-4,0.05) (-3,0.14) (-2,0.36) (-1,0.81) (0,1.5) (1,2.19) (2,2.64) (3,2.86) (4,2.95)};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep3pt
+  \item El índice $x'\beta$ es \textbf{lineal} (los log-odds son lineales) $\Rightarrow$ la frontera de decisión $p(x) = 0.5 \iff x'\beta = 0$ es un \textbf{hiperplano}.
+  \item $e^{\beta_j}$: el \emph{odds ratio} de una unidad extra de $x_j$ --- la interpretación que ya conocen de Econometría II.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Estimación: máxima verosimilitud y su gradiente}
+\small
+\textbf{1. La verosimilitud} de $n$ observaciones independientes ($p_i \equiv p(x_i)$):
+\[ \ell(\beta) \;=\; \sum_{i=1}^{n} \Big[ y_i \log p_i + (1 - y_i)\log(1 - p_i) \Big] \;=\; \sum_{i=1}^{n} \Big[ y_i\, x_i'\beta - \log\big(1 + e^{x_i'\beta}\big) \Big] \]
+\pause
+\textbf{2. Derivamos} (usando $\frac{\partial}{\partial \beta} \log(1 + e^{x_i'\beta}) = x_i\, p_i$):
+\[ \frac{\partial \ell}{\partial \beta} \;=\; \sum_{i=1}^{n} x_i \big( y_i - p_i \big) \]
+\pause
+\textbf{3. Igualar a cero no tiene solución cerrada} (los $p_i$ dependen de $\beta$ no linealmente) $\Rightarrow$ se resuelve por Newton--Raphson (IRLS): iterar hasta converger.
+\pause
+
+\vspace{0.15cm}
+\begin{itemize}\itemsep4pt
+  \item \textbf{Miren el gradiente:} ``residuo'' $y_i - p_i$ por regresor --- la misma cantidad que el \emph{boosting logístico} de la semana pasada ajustaba con árboles. No era coincidencia: era el gradiente.
+  \item Y todo lo de las sesiones 2--3 aplica intacto: \textbf{logística penalizada} L1/L2 con \texttt{glmnet} (familia \texttt{binomial}) para $p$ grande.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{$k$-NN: el clasificador sin modelo}
+\small
+\textbf{La regla más simple posible:} para clasificar $x$, mirar sus $k$ vecinos más cercanos en los datos y \textbf{votar}:
+\[ \hat{p}(x) \;=\; \frac{1}{k} \sum_{i \in N_k(x)} y_i \]
+\pause
+
+\begin{itemize}\itemsep4pt
+  \item $k$ es la \textbf{perilla de complejidad} (¡otra vez la curva U!): $k = 1$ memoriza (frontera rugosísima, varianza máxima); $k = n$ predice la clase mayoritaria siempre (sesgo máximo). Se elige por CV.
+  \item Requiere \textbf{estandarizar} (distancias mezclan escalas) y es caro en predicción (buscar vecinos). \pause
+\end{itemize}
+
+\vspace{0.15cm}
+\textbf{Su talón de Aquiles: la maldición de la dimensionalidad.} En dimensión $p$, para capturar el 10\% de los datos uniformes en un cubo se necesita un sub-cubo de lado
+\[ 0.1^{1/p}: \qquad p = 1 \rightarrow 0.10; \qquad p = 10 \rightarrow 0.79; \qquad p = 100 \rightarrow 0.98 \]
+\pause
+Con $p$ moderadamente grande, los ``vecinos más cercanos'' \textbf{están lejísimos}: la localidad --- el alma del método --- muere. Moraleja: $k$-NN brilla con pocas dimensiones informativas; en alta dimensión, volver a los métodos con estructura (lineales regularizados, árboles).
+\end{frame}
+
+%%=================================================
+\begin{frame}{LDA y Naive Bayes, en una diapositiva}
+\small
+\textbf{El enfoque generativo:} en vez de modelar $P(y \mid x)$ directamente (logística: \emph{discriminativo}), modelar cómo se \emph{generan} los datos de cada clase y voltear con Bayes:
+\[ P(y = k \mid x) \;\propto\; \pi_k \, f_k(x) \]
+\pause
+
+\begin{itemize}\itemsep5pt
+  \item \textbf{LDA} (análisis discriminante lineal): $f_k$ = normal multivariada con \textbf{misma covarianza} por clase $\Rightarrow$ frontera lineal, como la logística. Gana cuando $n$ es chico y la normalidad es razonable (usa más estructura); pierde robustez si no. \pause
+  \item \textbf{Naive Bayes}: supone los predictores \textbf{independientes dentro de cada clase}: $f_k(x) = \prod_j f_{kj}(x_j)$. El supuesto es heroico y falso\ldots\ y aún así funciona sorprendentemente bien cuando $p$ es enorme y los datos escasos. \pause
+  \item ¿Dónde brilla NB? \textbf{Texto}: miles de palabras como predictores (el clásico filtro de spam). Guarden la idea para la sesión 9.
+\end{itemize}
+\pause
+
+\begin{block}{Mapa mental}
+Logística $=$ discriminativo, pocos supuestos. LDA/NB $=$ generativos, más supuestos $=$ más eficiencia \emph{si} los supuestos aguantan.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{SVM: la intuición del margen máximo}
+\small
+\textbf{Otra filosofía:} no modelar probabilidades --- buscar directamente el hiperplano que separa las clases con el \textbf{margen más ancho} posible.
+
+\vspace{0.15cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.53]
+  \draw[thick] (-0.3,0.42) -- (5.3,3.78);   % separador y=0.6x+0.6
+  \draw[dashed] (-0.3,1.32) -- (5.3,4.68);  % margen sup y=0.6x+1.5
+  \draw[dashed] (-0.3,-0.48) -- (5.3,2.88); % margen inf y=0.6x-0.3
+  % clase + (azul, arriba)
+  \foreach \px/\py in {0.7/2.9, 1.4/3.6, 2.2/4.1, 0.4/3.6, 2.6/4.6} \fill[blue] (\px,\py) circle (3pt);
+  \fill[blue] (1.0,2.1) circle (3pt); \draw[blue, thick] (1.0,2.1) circle (6pt);
+  \fill[blue] (2.5,3.0) circle (3pt); \draw[blue, thick] (2.5,3.0) circle (6pt);
+  % clase - (roja, abajo)
+  \foreach \px/\py in {2.9/0.6, 3.6/1.0, 4.5/1.5, 3.2/0.2, 4.8/0.7} \fill[red] (\px,\py) circle (3pt);
+  \fill[red] (2.4,1.14) circle (3pt); \draw[red, thick] (2.4,1.14) circle (6pt);
+  \fill[red] (3.8,1.98) circle (3pt); \draw[red, thick] (3.8,1.98) circle (6pt);
+  \node[font=\scriptsize, rotate=31] at (4.6,3.95) {margen};
+  \node[font=\scriptsize, rotate=31] at (4.75,2.28) {margen};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep2pt
+  \item Solo los puntos \textbf{sobre el margen} (los \emph{vectores de soporte}, circulados) determinan la solución.
+  \item \textbf{Soft margin} ($C$): permitir violaciones pagando un costo --- la perilla de regularización, por CV.
+  \item \textbf{Kernel trick:} reemplazar productos internos por $K(x, x')$ $=$ separar en un espacio de dimensión altísima \emph{sin construirlo} $\Rightarrow$ fronteras no lineales. \pause
+  \item \textbf{Letra menuda:} el SVM entrega \emph{scores}, no probabilidades calibradas.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 3: MÉTRICAS
+%%#################################################
+%%#################################################
+\section{Métricas: decidir con costos}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Por qué la exactitud engaña}
+\small
+\textbf{Escenario realista:} en una encuesta de hogares, el 5\% está en pobreza extrema. Entrenamos un clasificador para focalizar una transferencia.
+\pause
+
+\vspace{0.2cm}
+\begin{block}{Pregunta para la sala}
+El modelo ``\emph{nadie} es pobre extremo'' tiene una exactitud del 95\%. ¿Es un buen modelo?
+\end{block}
+\pause
+
+\textcolor{gray}{Es \textbf{inútil}: no encuentra a una sola de las personas que el programa busca. Con clases desbalanceadas, la exactitud premia ignorar a la clase minoritaria --- que casi siempre es \emph{la que importa} (el moroso, el fraude, el hogar pobre, el desertor).}
+\pause
+
+\vspace{0.2cm}
+\begin{itemize}\itemsep4pt
+  \item El problema no es del modelo sino de la \textbf{métrica}: la exactitud pesa cada error igual, y nuestros errores \textbf{no cuestan igual}.
+  \item Necesitamos vocabulario para los \emph{tipos} de error --- y luego, precios para cada uno.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La matriz de confusión y su vocabulario}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.92]
+  \node[font=\scriptsize\bfseries] at (2.75,2.85) {Predicho $+$};
+  \node[font=\scriptsize\bfseries] at (6.05,2.85) {Predicho $-$};
+  \node[font=\scriptsize\bfseries, rotate=90] at (0.55,1.75) {Real $+$};
+  \node[font=\scriptsize\bfseries, rotate=90] at (0.55,0.45) {Real $-$};
+  \draw[fill=green!15] (1.1,1.2) rectangle (4.4,2.4); \node[font=\scriptsize] at (2.75,1.8) {\textbf{VP} (verdadero positivo)};
+  \draw[fill=red!15]   (4.4,1.2) rectangle (7.7,2.4); \node[font=\scriptsize] at (6.05,1.8) {\textbf{FN} (falso negativo)};
+  \draw[fill=orange!15] (1.1,0.0) rectangle (4.4,1.2); \node[font=\scriptsize] at (2.75,0.6) {\textbf{FP} (falso positivo)};
+  \draw[fill=green!8]  (4.4,0.0) rectangle (7.7,1.2); \node[font=\scriptsize] at (6.05,0.6) {\textbf{VN} (verdadero negativo)};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep4pt
+  \item \textbf{Sensibilidad / recall} $= \frac{VP}{VP + FN}$: de los positivos reales, ¿qué fracción encontré? \textcolor{gray}{(¿A cuántos pobres llegó el programa?)}
+  \item \textbf{Especificidad} $= \frac{VN}{VN + FP}$: de los negativos reales, ¿a cuántos dejé en paz?
+  \item \textbf{Precisión} $= \frac{VP}{VP + FP}$: de mis alarmas, ¿cuántas eran ciertas? \textcolor{gray}{(¿Qué fracción del gasto llegó bien?)}
+  \item \textbf{F1} $= 2\,\frac{\text{prec} \cdot \text{recall}}{\text{prec} + \text{recall}}$: media armónica --- castiga estar mal en cualquiera de las dos.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El umbral es una decisión económica (derivémoslo)}
+\small
+El modelo entrega $\hat{p}(x)$; la decisión exige un \textbf{umbral} $\tau$: predecir $+$ si $\hat{p}(x) \geq \tau$. ¿Quién fija $\tau$? \textbf{Los costos.}
+\pause
+
+\vspace{0.15cm}
+Sean $c_{FP}$ y $c_{FN}$ los costos de cada error. Para un individuo con probabilidad $p$:
+\vspace{0.1cm}
+
+\textbf{1. Costo esperado de predecir $+$:} \quad $(1 - p)\, c_{FP}$ \hfill (me equivoco si era $-$)
+
+\textbf{2. Costo esperado de predecir $-$:} \quad $p\, c_{FN}$ \hfill (me equivoco si era $+$)
+\pause
+
+\textbf{3. Predecir $+$ cuando} $(1-p)\,c_{FP} \leq p\, c_{FN}$, es decir:
+\[ \boxed{ \; p \;\geq\; \tau^{*} \;=\; \frac{c_{FP}}{c_{FP} + c_{FN}} \; } \]
+\pause
+
+\begin{itemize}\itemsep4pt
+  \item Solo importa el \textbf{cociente} de costos. Errores igual de caros $\Rightarrow \tau^* = 0.5$ (la regla de Bayes). $FN$ diez veces más caro $\Rightarrow \tau^* = 1/11 \approx 0.09$: alarma temprana.
+  \item \textbf{La estadística estima $p$; la economía pone $c_{FP}$ y $c_{FN}$.} El umbral $0.5$ por defecto de los paquetes es una decisión económica \emph{implícita} --- y casi nunca la correcta.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Dos mini-casos para calibrar la intuición}
+\small
+\textbf{Caso 1 --- Focalizar una transferencia contra la pobreza extrema:}
+\begin{itemize}\itemsep3pt
+  \item $c_{FN}$: excluir a un hogar pobre $=$ costo humano y de misión del programa: \textbf{alto}.
+  \item $c_{FP}$: incluir a un no-pobre $=$ filtración fiscal: real, pero menor.
+  \item $\Rightarrow \tau^*$ \textbf{bajo}: ante la duda, incluir. (Y medir la filtración con la \emph{precisión}.)
+\end{itemize}
+\pause
+
+\vspace{0.2cm}
+\textbf{Caso 2 --- Aprobar un crédito:}
+\begin{itemize}\itemsep2pt
+  \item Aquí el ``positivo'' es \emph{impago}. $c_{FN}$: prestarle a quien impaga $=$ pérdida de capital: \textbf{alta}.
+  \item $c_{FP}$: negarle a un buen pagador $=$ margen no ganado: menor.
+  \item $\Rightarrow \tau^*$ \textbf{bajo también} --- aunque los bancos lo calibran sobre la \textbf{ganancia esperada} de la cartera completa.
+\end{itemize}
+\pause
+
+\begin{block}{El patrón general}
+Mismo modelo, distinta economía $\Rightarrow$ distinto umbral. Reportar ``exactitud'' sin discutir costos es esconder la decisión.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La curva ROC: todos los umbrales a la vez}
+\small
+Barriendo $\tau$ de $1$ a $0$ y graficando (tasa de FP, tasa de VP) en cada punto:
+
+\vspace{0.15cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.78]
+  \fill[blue!8] (0,0) -- (0.3,1.6) -- (0.6,2.4) -- (1.2,3.0) -- (2.0,3.4) -- (2.8,3.7) -- (4,4) -- (4,0) -- cycle;
+  \draw[->] (0,0) -- (4.5,0) node[below, font=\scriptsize] {tasa de falsos positivos};
+  \draw[->] (0,0) -- (0,4.4) node[above, font=\scriptsize] {tasa de verdaderos positivos (recall)};
+  \draw[dashed, gray] (0,0) -- (4,4);
+  \draw[blue, very thick] plot[smooth] coordinates {(0,0) (0.3,1.6) (0.6,2.4) (1.2,3.0) (2.0,3.4) (2.8,3.7) (4,4)};
+  \fill[black] (0.6,2.4) circle (2.6pt);
+  \node[font=\scriptsize] at (1.75,2.15) {$\tau$ alto (exigente)};
+  \fill[black] (2.8,3.7) circle (2.6pt);
+  \node[font=\scriptsize] at (2.75,4.15) {$\tau$ bajo (generoso)};
+  \node[font=\scriptsize, gray, rotate=45] at (1.3,1.05) {azar};
+  \node[font=\scriptsize, blue] at (3.35,1.3) {AUC $=$ área};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep3pt
+  \item La ROC muestra el \textbf{menú completo} de intercambios FP--VP; cada punto es un umbral.
+  \item \textbf{AUC} (área bajo la curva): $0.5 =$ azar, $1 =$ perfecto. Interpretación exacta: \emph{la probabilidad de que un positivo aleatorio reciba mayor score que un negativo aleatorio}.
+  \item Por eso el AUC compara \textbf{modelos} sin fijar umbral --- y por eso \textbf{no} sustituye la elección de $\tau$: rankear bien y decidir bien son pasos distintos.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Dos letras menudas que salvan análisis}
+\small
+\textbf{1. Con desbalance fuerte, la ROC luce optimista.}
+\begin{itemize}\itemsep2pt
+  \item La tasa de FP divide por los negativos, que son \emph{muchísimos}: miles de falsas alarmas apenas la mueven.
+  \item Alternativa: la curva \textbf{precisión--recall} (PR), que no usa los VN: muestra cruda la calidad de las alarmas con positivos raros. Desbalance fuerte $\Rightarrow$ reportar ambas.
+\end{itemize}
+\pause
+
+\vspace{0.1cm}
+\textbf{2. ¿$\hat{p} = 0.8$ significa 80\%? Eso es la calibración.}
+
+\begin{center}
+\begin{tikzpicture}[scale=0.55]
+  \draw[->] (0,0) -- (4.5,0) node[below, font=\scriptsize] {prob.\ predicha $\hat{p}$};
+  \draw[->] (0,0) -- (0,4.3);
+  \node[font=\scriptsize, rotate=90] at (-0.45,2.1) {frec.\ observada};
+  \draw[dashed, gray] (0,0) -- (4,4);
+  \draw[red, very thick] plot[smooth] coordinates {(0,0.4) (1,1.15) (2,2.0) (3,2.85) (4,3.6)};
+  \node[font=\scriptsize, gray, anchor=west] at (5.0,3.3) {- - calibración perfecta};
+  \node[font=\scriptsize, red, anchor=west] at (5.0,2.6) {--- modelo (sobreconfianza)};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep2pt
+  \item Descalibrado $\Rightarrow$ el umbral de costos $\tau^*$ sobre $\hat{p}$ decide mal. La logística suele salir calibrada; boosting y SVM, no $\Rightarrow$ recalibrar (Platt/isotónica) en validación.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 4: DESBALANCEO DE CLASES
+%%#################################################
+%%#################################################
+\section{Desbalanceo de clases}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{El problema, y el arsenal de remedios}
+\small
+\textbf{El problema:} con 2\% de impagos, la pérdida agregada apenas nota a la clase minoritaria: el modelo optimiza ignorándola.
+\pause
+
+\vspace{0.15cm}
+\textbf{Los remedios, del más simple al más elaborado:}
+\begin{enumerate}\itemsep4pt
+  \item \textbf{Pesos en la pérdida} (\emph{class weights}): multiplicar el costo de los errores en la clase rara. Sin tocar los datos; disponible en casi todo (\texttt{glmnet}, \texttt{ranger}, \texttt{xgboost}). \pause
+  \item \textbf{Submuestrear} la clase mayoritaria: rápido, pero tira datos.
+  \item \textbf{Sobremuestrear} la minoritaria (duplicar): no inventa nada, pero invita al sobreajuste sobre copias. \pause
+  \item \textbf{SMOTE} (Chawla et al., 2002): crear ejemplos \emph{sintéticos} de la clase rara interpolando entre vecinos: $x_{new} = x_i + u \cdot (x_{nn} - x_i)$, $u \sim U(0,1)$.
+\end{enumerate}
+\pause
+
+\vspace{0.1cm}
+\begin{block}{Las dos advertencias no negociables}
+(i) Todo remuestreo ocurre \textbf{solo en el entrenamiento, dentro de cada fold} --- remuestrear antes de partir es \emph{leakage} de manual (regla de oro \#3). (ii) Remuestrear \textbf{distorsiona las probabilidades} ($\hat{p}$ queda inflada): recalibrar antes de usar umbrales de costos.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Remuestrear\ldots\ o simplemente decidir mejor?}
+\small
+\textbf{La pregunta incómoda:} si el modelo \emph{rankea} bien (AUC decente) y está calibrado, ¿necesitábamos remuestrear?
+\pause
+
+\vspace{0.15cm}
+\begin{itemize}\itemsep5pt
+  \item Muchas veces \textbf{no}: mover el umbral $\tau^*$ según costos logra lo mismo que el remuestreo --- con probabilidades honestas y sin cirugía sobre los datos.
+  \item El remuestreo/pesos ayuda de verdad cuando la clase rara es \emph{tan} rara que el modelo ni aprende su estructura (el algoritmo nunca ve suficientes positivos en cada corte/paso). \pause
+\end{itemize}
+
+\vspace{0.15cm}
+\textbf{El flujo del practicante:}
+\begin{enumerate}\itemsep3pt
+  \item Entrenar normal $+$ evaluar con ROC \textbf{y} PR (nunca exactitud sola).
+  \item Calibrar; decidir con $\tau^*$ de costos.
+  \item ¿Aún mal en recall/precisión? Probar pesos de clase; SMOTE de último recurso.
+  \item Y siempre: CV \textbf{estratificado} (cada fold conserva la proporción de clases).
+\end{enumerate}
+\pause
+
+\begin{block}{Para la aplicación de esta semana}
+Focalización de pobreza extrema: logística vs.\ $k$-NN vs.\ SVM, comparados por AUC, y el análisis de sensibilidad al umbral con costos explícitos. Exactamente este flujo.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Recap}
+\small
+\begin{enumerate}\itemsep6pt
+  \item El ideal es el \textbf{clasificador de Bayes}; su error es el $\sigma^2$ de la clasificación. Todo método estima $P(y \mid x)$ o su frontera.
+  \item \textbf{Logística}: log-odds lineales, MV sin forma cerrada, gradiente $\sum x_i(y_i - p_i)$; se regulariza con todo lo de las sesiones 2--3. \textbf{$k$-NN}: local y sin modelo, muere en alta dimensión. \textbf{LDA/NB}: generativos, eficientes bajo supuestos. \textbf{SVM}: margen máximo $+$ kernels, scores sin calibrar.
+  \item La \textbf{exactitud engaña} con desbalance; el vocabulario correcto es la matriz de confusión (recall, precisión, F1).
+  \item \textbf{El umbral es economía}: $\tau^* = c_{FP}/(c_{FP} + c_{FN})$. La ROC/AUC compara modelos sin umbral; la PR es más honesta con clases raras; nada funciona sin \textbf{calibración}.
+  \item \textbf{Desbalanceo}: pesos $\rightarrow$ remuestreo $\rightarrow$ SMOTE, siempre dentro del fold y recalibrando; a menudo basta decidir mejor con el umbral.
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}
+\vspace{2.0cm}
+\Large{Preparación para la próxima clase\ldots}
+\end{frame}
+
+%%#################################################
+%%#################################################
+%% PARTE 5: PRÓXIMA CLASE
+%%#################################################
+%%#################################################
+
+%%=================================================
+\begin{frame}{Para aprovechar al máximo la próxima sesión}
+\small
+\textbf{Lecturas obligatorias de esta semana:}
+\begin{itemize}\itemsep4pt
+  \item ISLR, cap.\ 4 (secs.\ 4.1--4.4) y cap.\ 9 (secs.\ 9.1--9.3). \\ \textcolor{gray}{Guía: logística y LDA en el 4; la intuición del margen en el 9.}
+  \item Fawcett (2006), \emph{An Introduction to ROC Analysis}. \\ \textcolor{gray}{Guía: secciones 1--5; es \emph{el} manual de la curva ROC.}
+\end{itemize}
+
+\textbf{Recomendadas:} Chawla et al.\ (2002, SMOTE); ESL cap.\ 4.
+\pause
+
+\vspace{0.2cm}
+\textbf{Próxima sesión --- el cierre del puente:} \emph{machine learning para inferencia causal}. Double/debiased ML y \emph{causal forests}: la predicción al servicio de un $\beta$ creíble. Lectura previa: Athey \& Imbens (2019), \emph{Machine Learning Methods That Economists Should Know About} (skim generoso). Con eso, la mitad de la sesión ya estará ganada.
+\pause
+
+\vspace{0.2cm}
+\textbf{Aplicación de esta semana en R:} clasificar hogares en pobreza extrema (encuesta de hogares): logística, $k$-NN y SVM por AUC, umbral por costos y curvas PR --- \texttt{tidymodels}.
+\end{frame}
+
+%%=================================================
+%% Referencias
+\begin{frame}{Referencias esenciales}
+\footnotesize
+\begin{itemize}\itemsep2pt
+  \item James, G., Witten, D., Hastie, T., \& Tibshirani, R. (2021). \emph{An Introduction to Statistical Learning} (2.\ ed.). Springer. Caps.\ 4 y 9. [ISLR]
+  \item Hastie, T., Tibshirani, R., \& Friedman, J. (2009). \emph{The Elements of Statistical Learning} (2.\ ed.). Springer. Cap.\ 4. [ESL]
+  \item Fawcett, T. (2006). An Introduction to ROC Analysis. \emph{Pattern Recognition Letters}, 27(8), 861--874.
+  \item Chawla, N., Bowyer, K., Hall, L., \& Kegelmeyer, W. (2002). SMOTE: Synthetic Minority Over-sampling Technique. \emph{JAIR}, 16, 321--357.
+  \item Cortes, C., \& Vapnik, V. (1995). Support-Vector Networks. \emph{Machine Learning}, 20(3), 273--297.
+  \item Platt, J. (1999). Probabilistic Outputs for Support Vector Machines. En \emph{Advances in Large Margin Classifiers}.
+  \item Saito, T., \& Rehmsmeier, M. (2015). The Precision-Recall Plot Is More Informative than the ROC Plot on Imbalanced Datasets. \emph{PLOS ONE}, 10(3).
+\end{itemize}
+\normalsize
+\end{frame}
+
+%%=================================================
+%% End document
+\end{document}

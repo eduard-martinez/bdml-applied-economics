@@ -1,0 +1,859 @@
+\documentclass{beamer}
+
+%% Tema y configuraciones
+\usetheme{Boadilla}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=.,      % color de enlaces internos (índices, refs)
+    urlcolor=blue,    % color de URLs
+    citecolor=.,      % color de referencias bibliográficas
+}
+
+%% Helpers (macros y notación)
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\1}{\mathbb{I}}
+\newcommand{\MSE}{\mathrm{MSE}}
+\newcommand{\RSS}{\mathrm{RSS}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+%% Encabezado
+\title[BDML]{Big Data y Machine Learning \\ para Economía Aplicada}
+\subtitle{Week 07: Abrir la caja negra: importancia, dependencia parcial y SHAP}
+\author{Eduard F. Martinez Gonzalez, Ph.D.}
+\institute[]{Departamento de Economía, Universidad Icesi}
+\date{\today}
+
+%%=================================================
+%% Begin document
+\begin{document}
+
+%%=================================================
+%% Primer slide
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%=================================================
+\begin{frame}{Previously\ldots}
+\small
+\begin{itemize}\itemsep4pt
+  \item \textbf{Los árboles} encuentran solos las no linealidades y las interacciones; el \textbf{bosque} promedia y el \textbf{\emph{boosting}} suma en secuencia. En la prueba de 2022, la recta explicaba 0,58 de la participación del ganador y el bosque 0,66. \pause
+  \item Ganamos capacidad predictiva y perdimos la lectura: un bosque de 500 árboles no tiene coeficientes. La importancia nativa fue un primer vistazo, con tres trampas en titulares. \pause
+  \item Y desde la sesión 1 arrastramos una división de trabajo: el desempeño fuera de muestra es el \emph{estadístico}; \textbf{abrir el modelo es lo que le da sentido económico}. Ninguna de las dos cosas es un efecto causal.
+\end{itemize}
+\pause
+\begin{block}{Hoy}
+El kit estándar para abrir cualquier caja: \textbf{importancia} por permutación (y por qué la de impureza engaña), \textbf{dependencia parcial}, ICE y ALE, \textbf{valores de Shapley y SHAP}, jerarquía de \textbf{bloques} y error por \textbf{subgrupos}. Con los modelos de la sesión 6 reproducimos las figuras 3, 5 y 6 de Gelvez et al.\ (2026). Y una lista de lo que la interpretación \emph{no} es. Al final, la presentación estudiantil del paper de la sesión 6.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 1: PARA QUÉ ABRIR LA CAJA
+%%#################################################
+%%#################################################
+\section{Para qué abrir la caja}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cuatro razones para interpretar}
+\small
+\begin{enumerate}\itemsep3pt
+  \item \textbf{Auditar.} ¿El modelo de crédito usa el código postal como proxy de etnia? ¿Predice por las razones correctas o por una filtración? Fuster et al.\ (2022): las ganancias de un modelo flexible se reparten de forma desigual entre grupos. \pause
+  \item \textbf{Comunicar.} Un banco central no actúa porque un ensamble ``lo dijo''. Bluwstein et al.\ (2023) descomponen la probabilidad de crisis en contribuciones de crédito y curva de rendimientos. \pause
+  \item \textbf{Generar hipótesis.} Ludwig \& Mullainathan (2024): un algoritmo que predice la decisión del juez desde la foto del acusado revela rasgos que nadie había teorizado. \pause
+  \item \textbf{Saber de qué depende la predictibilidad.} Gelvez et al.\ (2026): no basta con ``AUC 0,93''; la pregunta es qué características del territorio la sostienen y si cambian de signo entre coaliciones.
+\end{enumerate}
+\pause
+\begin{block}{Dos escalas}
+\textbf{Global}: el modelo en promedio (importancias, curvas). \textbf{Local}: por qué \emph{esta} predicción para \emph{esta} mesa (SHAP). Las dos describen el modelo, no el mundo.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El mapa de herramientas de hoy}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{p{3.4cm}p{3.9cm}ll}
+\hline
+La pregunta & La herramienta & Escala & Agnóstica \\
+\hline
+¿Qué variables usa el modelo? & importancia por permutación; $|$SHAP$|$ medio & global & sí \\
+¿Y por impureza? & importancia nativa de los árboles & global & no \\
+¿Cómo depende $\hat{f}$ de $x_j$? & dependencia parcial (PDP), ICE, ALE & global & sí \\
+¿Por qué esta predicción? & SHAP local (cascada) & local & sí \\
+¿Qué bloque de información aporta? & ablación y jerarquía de bloques & global & sí \\
+¿Dónde falla y para quién? & error por subgrupos, calibración por grupo & global & sí \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\vspace{0.1cm}
+\begin{itemize}\itemsep3pt
+  \item \textbf{Agnóstica} significa que solo necesita evaluar $\hat{f}$ en puntos nuevos: sirve para el bosque, para XGBoost, para la red de la sesión 8 y para la logística.
+  \item Todas responden preguntas sobre \textbf{el modelo ajustado}. La diferencia entre ``el modelo usa la etnia'' y ``la etnia causa el voto'' es la sesión entera.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Un modelo para toda la sesión}
+\small
+\textbf{El objeto:} $\hat{f}$, el bosque afinado de la sesión 6 para la participación del ganador (2022, primera vuelta), con sus cuatro bloques de predictores: estrato y educación; infraestructura, urbanidad y escala; composición etaria y de género; composición étnica. Más los indicadores de departamento.
+\pause
+\vspace{0.1cm}
+\textbf{Tres cantidades que usaremos todo el tiempo:}
+\begin{itemize}\itemsep3pt
+  \item $\hat{f}(x)$: la predicción para una mesa con características $x = (x_1, \ldots, x_p)$.
+  \item $\E[\hat{f}(X)]$: la predicción promedio sobre las mesas (la ``base'' de las explicaciones locales).
+  \item $L(y, \hat{f})$ en un conjunto que el modelo no vio: la prueba o el OOB. \textbf{Todo lo de hoy se calcula fuera del entrenamiento}: interpretar un modelo sobre los datos que memorizó es interpretar su memoria.
+\end{itemize}
+\pause
+\vspace{0.1cm}
+\begin{block}{Notación}
+$x_{-j}$ son todas las variables menos la $j$; $\hat{f}(x_j, x_{-j})$ es el modelo evaluado con $x_j$ fijada y el resto en sus valores observados. Casi todas las herramientas de hoy son alguna forma de ``mover $x_j$ y ver qué hace $\hat{f}$''.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 2: IMPORTANCIA DE VARIABLES
+%%#################################################
+%%#################################################
+\section{Importancia de variables}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Importancia por impureza: barata y sesgada}
+\small
+\textbf{Definición} (Breiman et al., 1984): para cada variable $j$, sumar la reducción de RSS (o de Gini) que produjeron todos los cortes sobre $x_j$, en todos los árboles, ponderada por el tamaño del nodo. Se calcula \emph{durante} el entrenamiento; es la que \texttt{ranger} y \texttt{xgboost} devuelven por defecto.
+\pause
+\vspace{0.1cm}
+\textbf{Por qué engaña:}
+\begin{itemize}\itemsep3pt
+  \item \textbf{Sesgo hacia la cardinalidad} (Strobl et al., 2007): una variable continua o con muchas categorías ofrece más umbrales donde cortar; aunque sea ruido puro, en algún corte ``ayuda''. Un identificador numérico puede salir primero. \pause
+  \item \textbf{Se mide en el entrenamiento:} refleja lo que el árbol usó para memorizar, no lo que sirve para predecir. Con árboles sin podar, una variable de ruido acumula reducciones de impureza en los nodos pequeños. \pause
+  \item \textbf{Reparto entre correlacionadas:} dos proxies del mismo factor se turnan en los cortes y cada uno luce a medias.
+\end{itemize}
+\pause
+\begin{block}{Uso}
+Un primer ordenamiento gratis. Nunca el que se reporta.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Importancia por permutación: cuánto duele barajar}
+\framesubtitle{Breiman (2001); Fisher, Rudin \& Dominici (2019)}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.5, every node/.style={font=\scriptsize}]
+  % matriz original
+  \foreach \r in {0,...,4} \foreach \c in {0,...,3} \draw[fill=blue!8] (\c*0.9,-\r*0.6) rectangle (\c*0.9+0.85,-\r*0.6-0.55);
+  \foreach \r in {0,...,4} \draw[fill=orange!35] (1*0.9,-\r*0.6) rectangle (1*0.9+0.85,-\r*0.6-0.55);
+  \node at (1.7,0.55) {datos de prueba};
+  \node at (1.35,-3.3) {$x_j$ barajada};
+  \draw[-{Stealth}, very thick] (1.35,-0.15) to[bend left=50] (1.35,-2.6);
+  \draw[-{Stealth}, very thick] (1.35,-2.6) to[bend left=50] (1.35,-0.15);
+  \draw[-{Stealth}, thick] (4.0,-1.3) -- (5.6,-1.3);
+  \node[draw, rounded corners, fill=gray!10, minimum height=0.8cm] at (6.6,-1.3) {$\hat{f}$};
+  \draw[-{Stealth}, thick] (7.4,-1.3) -- (9.0,-1.3);
+  \node[align=left, anchor=west] at (9.1,-1.3) {error con $x_j$ barajada \\ $-$ error original};
+\end{tikzpicture}
+\end{center}
+\pause
+\[ \mathrm{VI}_j \;=\; L\big(y, \hat{f}(X^{(j)})\big) \;-\; L\big(y, \hat{f}(X)\big), \qquad X^{(j)} = X \text{ con la columna } j \text{ permutada}. \]
+\pause
+\begin{itemize}\itemsep2pt
+  \item Barajar rompe la relación de $x_j$ con $y$ \emph{y} con las demás, sin reentrenar. Si el error no sube, el modelo no la necesitaba.
+  \item Se mide en unidades de la métrica: ``barajar la proporción afro sube el RMSE 2 pp''. Se repite $K$ veces y se promedia; el remuestreo de la sesión 4 le pone barras.
+  \item Se calcula en la \textbf{prueba} o en el \textbf{OOB} (la versión original de Breiman), nunca en el entrenamiento. Es agnóstica: sirve para cualquier $\hat{f}$.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Las trampas de la importancia (léanlas dos veces)}
+\small
+\begin{enumerate}\itemsep2pt
+  \item \textbf{Permutar fuerza a extrapolar} (Hooker, Mentch \& Zhou, 2021). Si estrato alto y servicios van juntos, barajar uno fabrica mesas ``de estrato alto sin servicios'' que no existen. Remedios: permutar dentro de grupos condicionales, reajustar sin la variable o permutar \textbf{bloques} enteros (apéndice A5). \pause
+  \item \textbf{El crédito se reparte.} Dos proxies del mismo factor lucen poco por separado y mucho juntos. La importancia por bloque responde ``¿importa la composición étnica?''. \pause
+  \item \textbf{Depende del modelo.} Dos modelos con el mismo error de prueba pueden apoyarse en variables distintas: el conjunto Rashomon de Fisher, Rudin \& Dominici (2019). \pause
+  \item \textbf{Es inestable.} Cien remuestras \emph{bootstrap} y cuántas veces cae cada variable en el top 5: la tabla de estabilidad de la sesión 5, ahora para bosques.
+\end{enumerate}
+\pause
+\begin{block}{Y la de siempre}
+Importante $\neq$ causal. La variable más importante del bosque puede no tener efecto alguno: basta con ser el mejor proxy de lo que sí lo tiene.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Ablación por bloques: la jerarquía de Gelvez et al.\ (2026)}
+\framesubtitle{Selección hacia adelante entre grupos de predictores, con CV}
+\small
+\textbf{La idea:} preguntar por \textbf{bloques} de información, no por variables: ¿cuánto predice cada bloque solo? ¿Cuánto añade cada uno dado los anteriores? Un modelo afinado por combinación, con CV dentro del entrenamiento; la prueba mide el resultado al final (Fig.\ 5 del paper).
+\pause
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{lllll}
+\hline
+Resultado & 1.\textsuperscript{er} bloque & 2.\textsuperscript{o} & 3.\textsuperscript{er} & 4.\textsuperscript{o} \\
+\hline
+Ganador local (AUC) & demografía & infraestr./urbanidad & etnia & estrato/educ. \\
+Particip.\ ganador ($R^2$) & demografía & etnia & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+Particip.\ electoral ($R^2$) & infraestr./urbanidad & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\begin{itemize}\itemsep2pt
+  \item La demografía sola ya da AUC de 0,83 a 0,92; el modelo completo, de 0,86 a 0,93: la predictibilidad viene de información \emph{compartida} entre bloques, no de uno decisivo.
+  \item Para la participación del ganador, la etnia añade hasta 4,6 pp de $R^2$ desde 2014. Para la participación electoral el orden cambia: primero cuán urbano y conectado es el territorio, luego quién vive ahí.
+  \item \textbf{Sin orden:} promediar la contribución de cada bloque sobre todos los órdenes. Eso es un valor de Shapley sobre el $R^2$ (Parte 4).
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 3: DEPENDENCIA PARCIAL, ICE Y ALE
+%%#################################################
+%%#################################################
+\section{Dependencia parcial, ICE y ALE}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{La dependencia parcial y sus curvas individuales}
+\framesubtitle{Friedman (2001); Goldstein et al.\ (2015)}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.44]
+  \draw[->] (0,0) -- (8.2,0) node[below, font=\scriptsize] {$x_j$};
+  \draw[->] (0,0) -- (0,4.4) node[above, font=\scriptsize] {$\hat{f}$};
+  % ICE curves
+  \draw[gray!70, thin] plot[smooth] coordinates {(0.3,1.0) (2,1.3) (4,2.2) (6,3.2) (7.8,3.6)};
+  \draw[gray!70, thin] plot[smooth] coordinates {(0.3,0.6) (2,0.8) (4,1.0) (6,1.1) (7.8,1.2)};
+  \draw[gray!70, thin] plot[smooth] coordinates {(0.3,2.2) (2,2.3) (4,3.0) (6,3.8) (7.8,4.1)};
+  \draw[gray!70, thin] plot[smooth] coordinates {(0.3,1.6) (2,1.7) (4,1.8) (6,1.9) (7.8,2.0)};
+  \draw[gray!70, thin] plot[smooth] coordinates {(0.3,2.8) (2,2.6) (4,2.4) (6,2.3) (7.8,2.2)};
+  \draw[gray!70, thin] plot[smooth] coordinates {(0.3,1.2) (2,1.5) (4,2.6) (6,3.5) (7.8,3.9)};
+  % PDP
+  \draw[blue, very thick] plot[smooth] coordinates {(0.3,1.57) (2,1.7) (4,2.17) (6,2.63) (7.8,2.83)};
+  \node[font=\scriptsize, blue] at (6.6,2.05) {PDP (promedio)};
+  \node[font=\scriptsize, gray] at (1.6,3.4) {curvas ICE};
+  \node[font=\scriptsize, gray] at (1.5,3.0) {(una por mesa)};
+\end{tikzpicture}
+\end{center}
+\pause
+\[ \text{PDP:} \quad \hat{f}_j(x_j) \;=\; \frac{1}{n}\sum_{i=1}^{n} \hat{f}\big(x_j,\, x_{i,-j}\big) \qquad\qquad \text{ICE}_i(x_j) \;=\; \hat{f}\big(x_j,\, x_{i,-j}\big). \]
+\pause
+\begin{itemize}\itemsep2pt
+  \item \textbf{PDP:} fijar $x_j$ en un valor para \emph{todas} las mesas, dejar el resto como está, promediar las predicciones; repetir sobre una grilla. Es una intervención \emph{en el modelo}, no en el mundo.
+  \item \textbf{ICE:} la misma curva, una por observación, sin promediar. El promedio oculta \textbf{heterogeneidad}: si la mitad sube y la mitad baja, el PDP sale plano. Curvas que se cruzan son la huella de una \textbf{interacción}.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cuándo el PDP engaña: correlación y extrapolación}
+\framesubtitle{Apley \& Zhu (2020): efectos locales acumulados (ALE)}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.4]
+  \draw[thick] (0,0) rectangle (7,5);
+  \fill[blue!15, rotate around={33:(3.5,2.5)}] (3.5,2.5) ellipse (3.3 and 0.9);
+  \node[font=\scriptsize, blue!70!black] at (3.5,2.5) {$x_1$ y $x_2$ correlados};
+  \node[font=\scriptsize] at (7.3,-0.3) {$x_1$};
+  \node[font=\scriptsize] at (-0.4,4.8) {$x_2$};
+  % PDP evalúa en la grilla completa
+  \foreach \x in {0.7,2.1,3.5,4.9,6.3} \foreach \y in {0.6,4.4} \node[red, font=\scriptsize] at (\x,\y) {$\times$};
+  \node[red, font=\scriptsize, align=left, anchor=west] at (7.4,4.2) {$\times$: donde el PDP \\ evalúa sin datos};
+  % ALE windows
+  \foreach \x in {1.4,2.8,4.2,5.6} \draw[dashed, teal] (\x,0) -- (\x,5);
+  \node[teal, font=\scriptsize, align=left, anchor=west] at (7.4,1.0) {franjas del ALE: \\ diferencias locales};
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep2pt
+  \item El PDP fija $x_1$ para todas las mesas, incluidas aquellas cuyo $x_2$ es incompatible con ese $x_1$: pide predecir en las esquinas vacías, donde $\hat{f}$ es una invención. Con proxies correlacionados, la curva puede tener la forma equivocada.
+  \item \textbf{ALE} solo mira \emph{diferencias locales}: dentro de cada franja de $x_1$, cuánto cambia $\hat{f}$ al mover $x_1$ de un borde al otro, para las mesas que \emph{sí} están ahí; luego acumula. Nunca extrapola y separa el efecto de $x_1$ del de sus correlacionadas (apéndice A4).
+  \item \textbf{Regla:} poco correlacionados, PDP con ICE; correlacionados, ALE. Siempre con la distribución de $x_j$ dibujada debajo: la curva no vale donde no hay datos.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Interacciones: lo que el bosque ganó, visto de frente}
+\small
+\begin{itemize}\itemsep4pt
+  \item \textbf{PDP en dos dimensiones:} fijar $(x_j, x_k)$ en una grilla y promediar. Se dibuja como mapa de calor; si las curvas de nivel no son paralelas, el efecto de $x_j$ depende de $x_k$. Es la lectura directa de ``la educación pesa distinto en lo urbano y en lo rural''. \pause
+  \item \textbf{ICE centradas:} restar a cada curva su valor en el mínimo de $x_j$; si se abren en abanico, hay interacción con algo. Es la prueba más barata. \pause
+  \item \textbf{El estadístico $H$ de Friedman} (2001): la fracción de la varianza de $\hat{f}_{jk}$ que $\hat{f}_j + \hat{f}_k$ no explica. Cero es aditividad; uno, interacción pura. \pause
+  \item \textbf{Valores SHAP de interacción} (Lundberg et al., 2020): la versión local, exacta para árboles.
+\end{itemize}
+\pause
+\begin{block}{Qué esperar}
+Si el bosque le ganó a la recta por 8 pp de $R^2$, esa diferencia \emph{tiene} que aparecer aquí: curvas no lineales, ICE en abanico o $H$ lejos de cero. Si no aparece, revisen la tabla de la sesión 6.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 4: VALORES DE SHAPLEY Y SHAP
+%%#################################################
+%%#################################################
+\section{Valores de Shapley y SHAP}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{El problema de repartir el crédito}
+\framesubtitle{Un ejemplo de juguete: tres coautores, un paper}
+\small
+Tres coautores $A$, $B$ y $C$ producen 22 ``puntos'' juntos. ¿Cuánto aportó cada uno? Solo lo sabríamos si conociéramos lo que produce \emph{cada subconjunto}, $v(S)$:
+\begin{center}
+\footnotesize
+\begin{tabular}{lcccccccc}
+\hline
+$S$ & $\emptyset$ & $A$ & $B$ & $C$ & $AB$ & $AC$ & $BC$ & $ABC$ \\
+$v(S)$ & 0 & 10 & 6 & 4 & 18 & 12 & 10 & 22 \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\textbf{La idea de Shapley (1953):} imaginar que los jugadores entran \emph{en un orden}, apuntar cuánto añade cada uno al entrar y \textbf{promediar sobre todos los órdenes}.
+\begin{center}
+\footnotesize
+\begin{tabular}{lccc}
+\hline
+Orden & $A$ añade & $B$ añade & $C$ añade \\
+\hline
+$A\,B\,C$ & 10 & 8 & 4 \\
+$A\,C\,B$ & 10 & 10 & 2 \\
+$B\,A\,C$ & 12 & 6 & 4 \\
+$B\,C\,A$ & 12 & 6 & 4 \\
+$C\,A\,B$ & 8 & 10 & 4 \\
+$C\,B\,A$ & 12 & 6 & 4 \\
+\hline
+Promedio $\phi$ & $10{,}67$ & $7{,}67$ & $3{,}67$ \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\textcolor{gray}{Suman 22: el reparto es \textbf{exacto}. $A$ vale más que sus 10 en solitario porque combina bien con $B$; $C$ vale menos que sus 4 porque es parcialmente redundante.}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El valor de Shapley: la fórmula y por qué es único}
+\small
+\[ \phi_j \;=\; \sum_{S \subseteq \{1,\ldots,p\} \setminus \{j\}} \frac{|S|!\,(p - |S| - 1)!}{p!}\;\Big[ v(S \cup \{j\}) - v(S) \Big]. \]
+El peso es la fracción de órdenes en los que $j$ entra justo después del conjunto $S$.
+\pause
+\vspace{0.1cm}
+\textbf{Es la única regla de reparto que cumple cuatro propiedades razonables} (apéndice A1):
+\begin{itemize}\itemsep2pt
+  \item \textbf{Eficiencia:} $\sum_j \phi_j = v(\text{todos}) - v(\emptyset)$. Todo el crédito se reparte.
+  \item \textbf{Simetría:} dos jugadores intercambiables reciben lo mismo.
+  \item \textbf{Jugador nulo:} quien nunca añade nada recibe cero.
+  \item \textbf{Aditividad:} el reparto de la suma de dos juegos es la suma de los repartos.
+\end{itemize}
+\pause
+\vspace{0.1cm}
+\begin{block}{De coautores a variables}
+Los jugadores son las $p$ variables; el ``juego'' es una predicción, $v(S) = $ la predicción del modelo usando solo las variables de $S$. El reparto explica por qué $\hat{f}(x)$ se aleja del promedio $\E[\hat{f}(X)]$. El costo: $2^p$ subconjuntos, y hay que definir qué significa ``usar solo $S$''.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{SHAP: Shapley para modelos de \emph{machine learning}}
+\framesubtitle{Lundberg \& Lee (2017); Lundberg et al.\ (2020)}
+\small
+\textbf{La explicación local es aditiva:} para una mesa $x$,
+\[ \hat{f}(x) \;=\; \underbrace{\E[\hat{f}(X)]}_{\phi_0,\ \text{base}} \;+\; \sum_{j=1}^{p} \phi_j(x), \]
+y cada $\phi_j(x)$ es el valor de Shapley de la variable $j$ en el juego ``predecir $x$''.
+\pause
+\vspace{0.05cm}
+\textbf{Qué es $v(S)$ para un modelo:} la predicción esperada cuando solo se conocen las variables de $S$. Hay que \emph{rellenar} las ausentes con datos de fondo, y hay dos maneras (apéndice A2):
+\begin{itemize}\itemsep1pt
+  \item \textbf{Marginal} (``fiel al modelo''): rellenar con valores de otras mesas al azar, ignorando la correlación: el PDP en versión local, con su extrapolación.
+  \item \textbf{Condicional} (``fiel a los datos''): rellenar con mesas parecidas en $x_S$. Respeta la correlación, pero da crédito a variables que el modelo ni usa.
+\end{itemize}
+\pause
+\textbf{Cómo se calcula:} \textbf{KernelSHAP} muestrea subconjuntos y ajusta una regresión ponderada (cualquier $\hat{f}$; lento; apéndice A3). \textbf{TreeSHAP} es exacto y polinomial para árboles, bosques y \emph{boosting}: por eso SHAP y XGBoost van juntos.
+\end{frame}
+
+%%=================================================
+\begin{frame}{De lo local a lo global: las figuras SHAP}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.5, every node/.style={font=\scriptsize}]
+% Beeswarm
+\begin{scope}
+  \draw[->] (-3.2,0) -- (3.4,0) node[below] {valor SHAP $\phi_j(x)$};
+  \draw[dashed, gray] (0,0) -- (0,4.4);
+  \node[anchor=east] at (-3.3,3.6) {afro};
+  \node[anchor=east] at (-3.3,2.7) {edad 20--29};
+  \node[anchor=east] at (-3.3,1.8) {servicios};
+  \node[anchor=east] at (-3.3,0.9) {estrato alto};
+  \foreach \x/\c in {-2.6/blue, -2.1/blue, -1.5/blue!60, -0.8/blue!30, -0.3/gray, 0.4/red!40, 1.2/red!60, 2.0/red, 2.7/red, 3.0/red} \fill[\c] (\x,3.6) circle (3pt);
+  \foreach \x/\c in {-1.6/blue, -1.0/blue!60, -0.5/blue!30, -0.1/gray, 0.3/red!40, 0.9/red!70, 1.5/red, 1.9/red} \fill[\c] (\x,2.7) circle (3pt);
+  \foreach \x/\c in {-1.2/red, -0.7/blue, -0.4/red!50, 0.0/gray, 0.3/blue!50, 0.8/red!70, 1.1/blue} \fill[\c] (\x,1.8) circle (3pt);
+  \foreach \x/\c in {-0.5/blue, -0.2/blue!40, 0.1/gray, 0.4/red!60, 0.7/red} \fill[\c] (\x,0.9) circle (3pt);
+  \node[align=center] at (0,5.2) {\emph{beeswarm}: una fila por variable, un punto por mesa \\ (color $=$ valor de la variable: \textcolor{blue}{bajo} a \textcolor{red}{alto})};
+\end{scope}
+% Waterfall
+\begin{scope}[shift={(9.5,0)}]
+  \draw[->] (0,0) -- (0,4.6);
+  \draw[dashed, gray] (-0.3,1.5) -- (5.3,1.5); \node[anchor=east] at (-0.3,1.5) {base $\phi_0$};
+  \draw[fill=red!50] (0.4,1.5) rectangle (1.2,2.9); \node[font=\tiny] at (0.8,-0.4) {afro};
+  \draw[fill=red!50] (1.6,2.9) rectangle (2.4,3.5); \node[font=\tiny] at (2.0,-0.4) {edad};
+  \draw[fill=blue!50] (2.8,3.5) rectangle (3.6,2.8); \node[font=\tiny] at (3.2,-0.4) {serv.};
+  \draw[fill=blue!50] (4.0,2.8) rectangle (4.8,2.6); \node[font=\tiny] at (4.4,-0.4) {estr.};
+  \draw[dashed, gray] (-0.3,2.6) -- (5.3,2.6); \node[anchor=west] at (5.3,2.6) {$\hat{f}(x)$};
+  \node[align=center] at (2.6,5.2) {cascada: una mesa, \\ de la base a su predicción};
+\end{scope}
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep2pt
+  \item \textbf{Importancia global:} $\frac{1}{n}\sum_i |\phi_j(x_i)|$, con signo si se quiere (siguiente frame). Ordena como la permutación, pero con una lectura local detrás.
+  \item \textbf{Gráfico de dependencia:} $\phi_j(x_i)$ contra $x_{ij}$, una nube; su forma es la curva de dependencia y su \emph{dispersión vertical} es la interacción con las demás. Coloreado por otra variable, la interacción se ve.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{SHAP con criterio: la receta de Gelvez et al.\ (2026)}
+\framesubtitle{Signo, rangos y no magnitudes entre modelos distintos}
+\small
+\begin{itemize}\itemsep2pt
+  \item \textbf{Importancia con signo:} $\text{media}(|\phi_j|) \times \mathrm{sign}\big(\mathrm{corr}(x_j, \phi_j)\big)$: la magnitud dice cuánto contribuye la variable; el signo, en qué dirección general (calculado con TreeSHAP sobre 5.000 mesas de prueba por modelo). \pause
+  \item \textbf{Rangos, no magnitudes, entre modelos:} cada elección y vuelta tiene su propio bosque; los $|\phi|$ de dos modelos distintos no son comparables. Se comparan \emph{posiciones} y \emph{signos} (Fig.\ 6 del paper). \pause
+\end{itemize}
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lccccccccc}
+\hline
+Rango y dirección & 06 & 10-I & 10-II & 14-I & 14-II & 18-I & 18-II & 22-I & 22-II \\
+\hline
+Proporción afrocolombiana & 2 $-$ & 7 $-$ & 11 $-$ & 1 $+$ & 1 $+$ & 1 $-$ & 1 $-$ & 1 $+$ & 1 $+$ \\
+Proporción indígena & 1 $-$ & 1 $-$ & 10 $-$ & 2--3 $+$ & 2--3 $+$ & 2--3 $-$ & 2--3 $-$ & 2--3 $+$ & 2--3 $+$ \\
+Edad 20--29 & $\cdot$ $-$ & 2 $-$ & $\cdot$ $-$ & $\cdot$ $-$ & $\cdot$ $+$ & 3--4 $-$ & 3--4 $-$ & 3 $+$ & 3 $+$ \\
+Servicios por vivienda & $\cdot$ $+$ & $\cdot$ $+$ & 3 $+$ & $\cdot$ $-$ & $\cdot$ $+$ & 3--4 $-$ & 3--4 $-$ & 4--5 $+$ & 4--5 $+$ \\
+\hline
+\end{tabular}
+\end{center}
+{\scriptsize\textcolor{gray}{Fuente: Gelvez et al.\ (2026), Fig.\ 6 y texto de la sección 6.3; $\cdot$ $=$ rango no reportado en el texto. Signo $+$: valores altos mueven la predicción hacia el ganador.}}
+\pause
+\begin{itemize}\itemsep2pt
+  \item \textbf{La lectura:} las mismas variables siguen mandando mientras \emph{cambian de signo} con la coalición ganadora (contra Uribe y Duque; a favor de Santos en 2014 y de Petro en 2022). La estructura es estable; su alineación política, no. Eso es lo que la caja abierta añade al AUC.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Qué no es un valor SHAP}
+\small
+\begin{enumerate}\itemsep2pt
+  \item \textbf{No es un efecto causal.} Reparte una predicción entre variables \emph{del modelo}. Si la etnia es el mejor proxy de la exposición al conflicto, la etnia se lleva el crédito. Gelvez et al.: ``describen cómo los predictores contribuyen a las predicciones, no el efecto independiente de cada característica''. \pause
+  \item \textbf{No es único.} Cambia con el relleno, el conjunto de fondo y el modelo: otro bosque igual de bueno puede repartir distinto. Reporten con qué se calculó. \pause
+  \item \textbf{No es individual cuando la unidad es un agregado.} La mesa no es el votante: la inferencia ecológica (Robinson, 1950). \pause
+  \item \textbf{No es un pronóstico.} Explica un modelo \emph{dentro} de una elección; que el signo de 2022 se repita en 2026 es una hipótesis. \pause
+  \item \textbf{No sustituye a la tabla de la prueba.} Una explicación bonita de un modelo malo es una historia sobre ruido.
+\end{enumerate}
+\pause
+\begin{block}{Rudin (2019), en una frase}
+Explicar una caja negra \emph{después} no la vuelve transparente; cuando la decisión lo exige, comparen con un modelo interpretable por diseño (logística, árbol corto) y midan cuánto se pierde.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 5: DÓNDE FALLA Y PARA QUIÉN
+%%#################################################
+%%#################################################
+\section{Dónde falla y para quién}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{El error por subgrupos: la interpretación que nadie olvida}
+\small
+Las importancias dicen \emph{de qué depende} la predicción; el error por subgrupos dice \emph{a quién} le falla. Es la parte del reporte que un lector de política lee primero.
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Por decil de $y$} (sesión 2): la compresión hacia la media hace que las mesas extremas fallen más. Un panel por modelo.
+  \item \textbf{Por territorio:} error medio por departamento y por ruralidad; el mapa de aciertos y fallos (Figs.\ 18 a 26 del paper). Manchas de fallos del mismo signo son autocorrelación espacial de los residuos: la validación por bloques de la sesión 4 la castiga.
+  \item \textbf{Por clase observada:} $\hat{p}$ para las mesas que ganó y las que perdió el presidente (Figs.\ 16 y 17): dos nubes separadas, y dónde se solapan.
+  \item \textbf{Por modelo:} la recta y el bosque fallan en sitios distintos; donde coinciden, la información no está en los datos.
+\end{itemize}
+\pause
+\begin{block}{La regla}
+Ningún reporte de un modelo predictivo está completo sin al menos un corte del error por subgrupos. Si el error se concentra en un grupo identificable, el promedio miente.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Equidad: cuando el subgrupo es una persona}
+\small
+\begin{itemize}\itemsep2pt
+  \item \textbf{La métrica por grupo.} Falsos positivos, falsos negativos, calibración y precisión \emph{por grupo} (etnia, género, estrato). Un modelo con AUC alta puede tener el doble de falsos negativos en un grupo. \pause
+  \item \textbf{La etiqueta importa más que el algoritmo.} Obermeyer et al.\ (2019): un modelo de salud usaba el gasto como proxy de la necesidad; los pacientes negros gastan menos a igual enfermedad y quedaban subestimados. Cambiar la etiqueta subía su participación entre los priorizados del 17,7\,\% al 46,5\,\%. \pause
+  \item \textbf{Quitar la variable sensible no basta.} El código postal, el estrato y el nombre la reconstruyen; la permutación y el SHAP de hoy son la manera de \emph{verlo}. \pause
+  \item \textbf{No se puede tener todo.} Calibración por grupo e igualdad de tasas de error son incompatibles si la prevalencia difiere (Kleinberg, Mullainathan \& Raghavan, 2017). Hay que elegir, y decir cuál.
+\end{itemize}
+\pause
+\begin{block}{Para sus proyectos}
+Si la predicción asigna algo a personas, la tabla de métricas por grupo va junto a la tabla de la prueba. Sin excepción.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 6: APLICACIÓN GUIADA
+%%#################################################
+%%#################################################
+\section{Aplicación guiada: reproducir las figuras 3, 5 y 6}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Datos, modelos y lo que vamos a producir}
+\small
+\textbf{Datos y modelos:} el panel de mesas de Gelvez et al.\ (2026) y los modelos de la sesión 6 para 2022, primera vuelta: bosque y XGBoost para la participación del ganador ($R^2$ de prueba del bosque: 0,662) y para el ganador local (AUC 0,931), más la recta como contraste. Todo en las \textbf{mesas de prueba}.
+\pause
+\textbf{El kit, en orden:}
+\begin{enumerate}\itemsep1pt
+  \item Importancia por impureza, por permutación (50 repeticiones, con barras) y $|$SHAP$|$ medio: una tabla.
+  \item Jerarquía de bloques con CV (Fig.\ 5) y Shapley del $R^2$ por bloque.
+  \item PDP con ICE y ALE: proporción afrocolombiana, servicios por vivienda, edad 20--29.
+  \item SHAP: \emph{beeswarm}, dependencia coloreada, cascada de una mesa, importancia con signo.
+  \item Predicho vs.\ observado (Fig.\ 3); error por decil, departamento y ruralidad.
+  \item 2018-I contra 2022-I: rangos y signos, no magnitudes (Fig.\ 6).
+\end{enumerate}
+\pause
+\begin{block}{La pregunta de hoy}
+¿De qué depende la predictibilidad de 2022, y cambió respecto a 2018?
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La tabla: una variable, tres importancias}
+\framesubtitle{Participación del ganador, 2022, primera vuelta; bosque afinado; mesas de prueba}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lcccc}
+\hline
+Variable & Impureza & Permut.\ $\Delta$RMSE [IC] & $|$SHAP$|$ (rango) & Signo \\
+\hline
+Prop.\ afrocolombiana & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & 1 & $+$ \\
+Prop.\ indígena & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & 2--3 & $+$ \\
+Edad 20--29 & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & 3 & $+$ \\
+Servicios por vivienda & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & 4--5 & $+$ \\
+Educación superior & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+Luminosidad nocturna & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+\hline
+\end{tabular}
+\end{center}
+{\scriptsize\textcolor{gray}{Rangos y signos SHAP publicados: Gelvez et al.\ (2026), Fig.\ 6, modelo del ganador local de 2022-I; los indicadores de departamento se excluyen del rango. El resto se calcula con el código de la sesión y puede diferir por la semilla y por el resultado (participación vs.\ ganador local).}}
+\pause
+\vspace{0.05cm}
+\begin{itemize}\itemsep1pt
+  \item \textbf{Qué buscar:} ¿coinciden los tres ordenamientos en el top 3? Si la impureza sube una variable continua que las otras no, es el sesgo de cardinalidad en vivo.
+  \item Si dos intervalos de permutación se solapan, no hay orden: es un \emph{empate}, y así se reporta.
+  \item La importancia por \textbf{bloque} (las dos étnicas juntas) supera la suma de las individuales si se reparten el crédito.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Las figuras (I): jerarquía y predicho vs.\ observado}
+\small
+\begin{enumerate}\itemsep4pt
+  \item \textbf{Jerarquía de bloques (Fig.\ 5).} Una curva del $R^2$ (o AUC) de prueba al añadir bloques en el orden que eligió el CV. Qué buscar: el primer bloque recorre casi todo; el salto de la etnia después de la demografía; los dos últimos casi planos. Al lado, la descomposición de Shapley del $R^2$: si un bloque vale mucho más ``primero'' que ``último'', su información está \emph{compartida}. \pause
+  \item \textbf{Predicho vs.\ observado (Fig.\ 3).} Un panel por modelo, la diagonal, y el $R^2$ dentro del panel. Qué buscar: la compresión hacia la media (más en la recta que en el bosque), y si 2022 sigue la diagonal más de cerca que 2018. \pause
+  \item \textbf{Error por decil y por departamento.} Barras del error medio por decil de participación y un mapa de residuos. Qué buscar: dónde se concentra el fallo, y si la recta y el bosque fallan en los mismos sitios.
+\end{enumerate}
+\pause
+\begin{block}{La comparación con 2018}
+Los dos bosques se ajustaron por separado: comparen \textbf{órdenes} de bloques y \textbf{rangos} de variables, no números de $R^2$ ni magnitudes SHAP.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Las figuras (II): dependencia y SHAP}
+\small
+\begin{enumerate}\itemsep4pt
+  \item \textbf{PDP con ICE} de la proporción afrocolombiana y \textbf{ALE} de la misma variable, con la distribución de $x_j$ debajo. Qué buscar: si el PDP y el ALE difieren, la correlación con otras variables está distorsionando el PDP; si las ICE se abren en abanico, hay interacción. \pause
+  \item \textbf{\emph{Beeswarm}} del bosque de 2022. Qué buscar: el orden (¿coincide con la permutación?), la dispersión de cada fila (¿hay mesas donde la variable pesa mucho y otras donde nada?) y el color (¿valores altos empujan hacia arriba?). \pause
+  \item \textbf{Dependencia SHAP} de la proporción afrocolombiana coloreada por servicios por vivienda. Qué buscar: la forma (¿lineal, escalón, saturación?) y si el color separa dos nubes: eso es la interacción con la urbanidad. \pause
+  \item \textbf{Cascada} de una mesa concreta: de la base a la predicción, variable por variable. Es la explicación que se le muestra a alguien que pregunta ``¿por qué esta mesa?''. \pause
+  \item \textbf{2018 contra 2022:} la tabla de rangos y signos. Qué buscar: los cambios de signo de la Fig.\ 6, reproducidos.
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}[fragile]{Cómo se ve en R (\texttt{DALEX} y \texttt{shapviz} sobre los modelos de la sesión 6)}
+\scriptsize
+\begin{verbatim}
+library(tidymodels); library(DALEX); library(shapviz)
+fit_rf <- extract_workflow(final)            # el bosque de la S6
+expl <- explain(fit_rf, data = select(test, -share),
+                y = test$share, label = "bosque")
+vi <- model_parts(expl, type = "difference", B = 50)  # permutar
+pd <- model_profile(expl, variables = c("afro", "servicios"))
+plot(pd, geom = "profiles")                  # ICE + PDP
+al <- model_profile(expl, variables = "afro",
+                    type = "accumulated")    # ALE
+xgb_fit <- extract_fit_engine(final_xgb)     # XGBoost de la S6
+X_te <- bake(extract_recipe(final_xgb), test) |>
+  select(-share) |> as.matrix()
+sv <- shapviz(xgb_fit, X_pred = X_te)        # TreeSHAP
+sv_importance(sv, kind = "bee")              # beeswarm
+sv_dependence(sv, v = "afro", color_var = "servicios")
+sv_waterfall(sv, row_id = 1)                 # una mesa
+\end{verbatim}
+\normalsize
+\small
+\begin{itemize}\itemsep2pt
+  \item \texttt{explain} envuelve cualquier modelo con sus datos de \textbf{prueba}; \texttt{model\_parts} permuta y \texttt{model\_profile} dibuja PDP, ICE o ALE (\texttt{plot(vi)}, \texttt{plot(al)}). La importancia con signo es \texttt{colMeans(abs(sv\$S))} por el signo de la correlación con \texttt{X\_te}.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Presentación estudiantil: el paper de la sesión 6}
+\framesubtitle{Quince minutos, tres preguntas}
+\small
+Medeiros, Vasconcelos, Veiga \& Zilberman (2021) o Bertrand \& Kamenica (2023), a elección de quien presenta.
+\begin{enumerate}\itemsep3pt
+  \item \textbf{¿Qué se predice y por qué importa?} La inflación de EE.\,UU.\ a varios horizontes con más de cien predictores; o a qué grupo (ingreso, educación, género, etnia, ideología) pertenece una persona según su consumo, sus medios o su uso del tiempo, y cómo cambia esa \emph{predictibilidad} desde 1965.
+  \item \textbf{¿Con qué datos y método, y cómo se evalúa?} Qué familias comparan y contra qué \emph{baseline}; cómo respetan el tiempo al validar (sesión 4); qué métrica y qué prueba de diferencia usan.
+  \item \textbf{¿Qué se encuentra y cómo se interpreta?} Por qué gana el bosque (¿selección de variables o no linealidad?); qué variables importan; qué significa que una distancia cultural sea ``la capacidad de adivinar el grupo''.
+\end{enumerate}
+\pause
+\begin{block}{Para el resto de la sala}
+¿Qué herramienta de hoy usan para abrir la caja, y en qué datos la calculan? ¿Alguna conclusión del paper depende de leer una importancia como un efecto?
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 7: INTERPRETACIÓN Y CIERRE
+%%#################################################
+%%#################################################
+\section{Interpretación y cierre}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Qué dice la caja abierta y qué no dice}
+\small
+\begin{itemize}\itemsep3pt
+  \item \textbf{Dice de qué depende la predictibilidad:} qué bloques y variables sostienen el $R^2$ o el AUC, con qué forma y en qué dirección. En Gelvez et al.\ (2026): etnia, edad y servicios, con signos que cambian con la coalición ganadora. \pause
+  \item \textbf{Dice dónde falla:} en qué mesas, departamentos y deciles; para qué grupos. \pause
+  \item \textbf{Dice cómo se comporta el modelo, no el mundo:} los tres ``no'' de la sesión: no es causal, no es individual (inferencia ecológica), no es pronóstico. \pause
+  \item \textbf{Es frágil:} cambia con el relleno, el conjunto de fondo, el modelo y la semilla. Se reporta con remuestreo y con la receta escrita.
+\end{itemize}
+\pause
+\begin{block}{$Y$, no $\beta$, versión caja abierta}
+El SHAP de la etnia no es $\beta_{\text{etnia}}$. Es la respuesta a ``¿cómo usa el modelo esta variable para predecir?''. Para pasar de ahí a ``¿qué pasaría si cambiara?'' hace falta un diseño de identificación; la sesión 9 muestra cuándo el ML ayuda a estimarlo.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cuándo usar qué, y qué leer}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{lp{4.3cm}p{4.4cm}}
+\hline
+ & Usar cuando & Cuidado con \\
+\hline
+Impureza & primer vistazo, gratis & cardinalidad; entrenamiento; nunca reportar \\
+Permutación & ordenar variables en cualquier modelo & extrapola con correlación; inestable; por bloques \\
+PDP $+$ ICE & forma del efecto, predictores poco correlados & el promedio esconde heterogeneidad \\
+ALE & forma del efecto con correlación & menos intuitivo; no local \\
+SHAP & explicación local y global coherente & relleno; costo sin árboles; no causal \\
+Bloques & preguntas por tipo de información & el orden es \emph{greedy}; Shapley del $R^2$ \\
+Error por grupo & siempre & que falte \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\vspace{0.05cm}
+\textbf{Qué leer:} Molnar (2025), capítulos de importancia por permutación, PDP, ALE y SHAP, con código; Lundberg \& Lee (2017) por la unificación; Lundberg et al.\ (2020) por TreeSHAP y las interacciones; Apley \& Zhu (2020) por ALE; Rudin (2019) por la objeción; Gelvez et al.\ (2026), sección 6.3, como modelo de reporte.
+\end{frame}
+
+%%=================================================
+\begin{frame}{Recap}
+\small
+\begin{enumerate}\itemsep3pt
+  \item \textbf{Interpretar} es auditar, comunicar, generar hipótesis y saber de qué depende la predictibilidad. Global y local. Siempre fuera del entrenamiento.
+  \item \textbf{Importancia:} la de impureza es gratis y sesgada; la de permutación mide cuánto duele barajar, con barras, y extrapola con correlación; por bloques cuando hay proxies. Importante $\neq$ causal.
+  \item \textbf{PDP, ICE y ALE:} mover $x_j$ y ver qué hace $\hat{f}$; el promedio esconde heterogeneidad (ICE) y la correlación lo distorsiona (ALE). Las interacciones se ven en abanico, en mapas de calor y en $H$.
+  \item \textbf{Shapley y SHAP:} el único reparto exacto de una predicción entre variables; TreeSHAP lo hace barato en árboles. Con signo, por rangos entre modelos, y con la receta escrita.
+  \item \textbf{Gelvez et al.:} la demografía sola casi llega; la etnia añade; las mismas variables cambian de signo con la coalición. Estructura estable, alineación cambiante.
+  \item \textbf{Lo que no es:} causal, individual, pronóstico. Y el error por subgrupos va siempre.
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}
+\vspace{2.0cm}
+\Large{Preparación para la próxima clase\ldots}
+\end{frame}
+
+%%#################################################
+%%#################################################
+%% PARTE 8: PRÓXIMA CLASE
+%%#################################################
+%%#################################################
+
+%%=================================================
+\begin{frame}{Para aprovechar al máximo la próxima sesión}
+\small
+\textbf{Lecturas obligatorias de esta semana:}
+\begin{itemize}\itemsep2pt
+  \item Molnar (2025), \emph{Interpretable Machine Learning}, capítulos de importancia por permutación, PDP, ALE y SHAP. \\ \textcolor{gray}{Guía: cada capítulo trae ventajas, desventajas y código; lean las desventajas dos veces.}
+  \item Lundberg \& Lee (2017), \emph{A Unified Approach to Interpreting Model Predictions}. \\ \textcolor{gray}{Guía: secciones 1 a 3; las propiedades y por qué el reparto es único.}
+\end{itemize}
+\textbf{Para la presentación estudiantil de la sesión 8:} Bluwstein, Buckmann, Joseph, Kapadia \& Şimşek (2023), \emph{Credit Growth, the Yield Curve and Financial Crisis Prediction}, JIE, o Ludwig \& Mullainathan (2024), \emph{Machine Learning as a Tool for Hypothesis Generation}, QJE.
+\pause
+\textbf{Próxima sesión: redes neuronales.} Qué son (composición de regresiones), cómo se entrenan (gradiente y retropropagación) y cuándo conviene usarlas frente a los árboles; y una aplicación con imágenes satelitales. Lectura previa: ISL cap.\ 10, secciones 10.1 a 10.3 y 10.6 a 10.7; Jean et al.\ (2016).
+\pause
+\textbf{Aplicación de esta semana en R:} el kit completo sobre los modelos de la sesión 6: la tabla de tres importancias, la jerarquía de bloques, PDP/ICE/ALE, SHAP y el error por subgrupos; las figuras 3, 5 y 6.
+\end{frame}
+
+%%=================================================
+%% Referencias
+\begin{frame}{Referencias esenciales}
+\scriptsize
+\begin{itemize}\itemsep0pt
+  \item Molnar, C. (2025). \emph{Interpretable Machine Learning} (3.\ ed.). \url{https://christophm.github.io/interpretable-ml-book/}
+  \item Strobl, C., Boulesteix, A.-L., Zeileis, A., \& Hothorn, T. (2007). Bias in Random Forest Variable Importance Measures. \emph{BMC Bioinformatics}, 8, 25.
+  \item Hooker, G., Mentch, L., \& Zhou, S. (2021). Unrestricted Permutation Forces Extrapolation. \emph{Statistics and Computing}, 31, 82.
+  \item Fisher, A., Rudin, C., \& Dominici, F. (2019). All Models Are Wrong, but Many Are Useful. \emph{JMLR}, 20(177), 1--81.
+  \item Apley, D., \& Zhu, J. (2020). Visualizing the Effects of Predictor Variables in Black Box Models. \emph{JRSS-B}, 82(4), 1059--1086. [ALE]
+  \item Lundberg, S., \& Lee, S.-I. (2017). A Unified Approach to Interpreting Model Predictions. \emph{NeurIPS}, 30.
+  \item Lundberg, S., et al.\ (2020). From Local Explanations to Global Understanding with Explainable AI for Trees. \emph{Nature Machine Intelligence}, 2, 56--67.
+  \item Rudin, C. (2019). Stop Explaining Black Box Machine Learning Models for High Stakes Decisions. \emph{Nature Machine Intelligence}, 1, 206--215.
+  \item Obermeyer, Z., et al.\ (2019). Dissecting Racial Bias in an Algorithm Used to Manage the Health of Populations. \emph{Science}, 366, 447--453.
+  \item Bluwstein, K., et al.\ (2023). Credit Growth, the Yield Curve and Financial Crisis Prediction. \emph{Journal of International Economics}, 145, 103773.
+  \item Ludwig, J., \& Mullainathan, S. (2024). Machine Learning as a Tool for Hypothesis Generation. \emph{QJE}, 139(2), 751--827.
+  \item Gelvez, J.\ D., Cardiles, A., Martínez-González, E.\ F., \& Muñoz, M. (2026). How Predictable Is an Election? Documento de trabajo.
+\end{itemize}
+\normalsize
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% APÉNDICE: PARA PROFUNDIZAR
+%%#################################################
+%%#################################################
+\appendix
+\section{Apéndice: para profundizar}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{A1. Por qué el valor de Shapley es único}
+\small
+Un \textbf{juego} es una función $v: 2^{P} \to \mathbb{R}$ con $v(\emptyset) = 0$ sobre los subconjuntos de $P = \{1, \ldots, p\}$. Una \textbf{regla de reparto} asigna $\phi_j(v)$ a cada jugador.
+\pause
+\textbf{1. Los juegos de unanimidad forman una base.} Para $T \subseteq P$ no vacío, sea $u_T(S) = \1\{T \subseteq S\}$. Cualquier $v$ se escribe de forma única como $v = \sum_T c_T\, u_T$ (Möbius): hay $2^p - 1$ juegos y $2^p - 1$ coeficientes.
+\pause
+\textbf{2. En un juego de unanimidad el reparto está forzado.} Los jugadores fuera de $T$ son nulos ($\phi_j = 0$); los de $T$ son simétricos, y por eficiencia se reparten $u_T(P) = 1$: $\phi_j(u_T) = 1/|T|$ para $j \in T$.
+\pause
+\textbf{3. Aditividad extiende a todo juego:} $\phi_j(v) = \sum_{T \ni j} c_T / |T|$. Una sola regla cumple los cuatro axiomas, y desarrollar los $c_T$ da la fórmula de las contribuciones marginales:
+\[ \phi_j = \sum_{S \subseteq P \setminus \{j\}} \frac{|S|!\,(p-|S|-1)!}{p!} \Big[ v(S \cup \{j\}) - v(S) \Big]. \]
+\pause
+\begin{itemize}\itemsep2pt
+  \item \textbf{Descomposición de Shapley del $R^2$} (Shorrocks, 2013; Israeli, 2007): el juego es $v(S) = R^2$ del modelo con los bloques de $S$. Con cuatro bloques son 16 modelos; cada uno afinado con CV. Es la versión sin orden de la jerarquía de la Parte 2.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A2. Rellenar lo ausente: SHAP marginal y condicional}
+\small
+El juego de una predicción necesita $v(S)$ para cada subconjunto de variables. Dos definiciones:
+\[ v^{\text{marg}}(S) = \E_{X_{-S}}\big[\hat{f}(x_S, X_{-S})\big], \qquad v^{\text{cond}}(S) = \E\big[\hat{f}(x_S, X_{-S}) \,\big|\, X_S = x_S\big]. \]
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Marginal:} muestrea $X_{-S}$ de un conjunto de fondo sin mirar $x_S$. Fiel al modelo: una variable que $\hat{f}$ no usa recibe exactamente cero. Precio: evalúa $\hat{f}$ en combinaciones imposibles (la extrapolación de la Parte 3).
+  \item \textbf{Condicional:} muestrea $X_{-S}$ dado $x_S$. Fiel a los datos: no extrapola. Precio: una variable que el modelo ignora recibe crédito si está correlacionada con una que sí usa, y estimar la condicional es difícil. Chen, Janizek, Lundberg \& Lee (2020) discuten cuándo usar cada una.
+  \item TreeSHAP en \texttt{xgboost} y \texttt{shap} usa por defecto la versión marginal (``intervencional'') con un conjunto de fondo; la variante ``dependiente del camino'' aproxima la condicional con las frecuencias de los nodos.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A3. KernelSHAP: Shapley como regresión ponderada}
+\small
+\textbf{Lundberg \& Lee (2017):} el valor de Shapley es la solución de una regresión lineal ponderada. Con $z \in \{0,1\}^p$ indicando qué variables están ``presentes'' y $v(z)$ la predicción esperada con solo esas,
+\[ \min_{\phi_0, \phi} \sum_{z} \pi(z)\, \Big[ v(z) - \phi_0 - \sum_j \phi_j z_j \Big]^2, \qquad \pi(z) = \frac{p-1}{\binom{p}{|z|}\,|z|\,(p-|z|)}, \]
+con $|z|$ el número de unos.
+\pause
+\begin{itemize}\itemsep3pt
+  \item El peso $\pi$ es enorme para subconjuntos casi vacíos o casi completos y pequeño en el medio; es exactamente el que hace que el mínimo cuadrado coincida con la fórmula de Shapley.
+  \item En la práctica se muestrean unos cientos o miles de $z$ (de $2^p$) y se resuelve el mínimo cuadrado: aproximado, agnóstico y lento, porque cada $z$ exige evaluar $\hat{f}$ sobre el conjunto de fondo.
+  \item \textbf{TreeSHAP} (Lundberg et al., 2020) evita el muestreo: recorre cada árbol una vez llevando la cuenta de cuántas observaciones de fondo pasan por cada rama, y obtiene los $\phi_j$ exactos en tiempo polinomial en la profundidad. Por eso el SHAP de un bosque de 500 árboles sobre 5.000 mesas se calcula en segundos.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A4. PDP, gráfico marginal y ALE, en fórmulas}
+\small
+Para un predictor $x_j$ y el resto $x_{-j}$, tres curvas que responden preguntas distintas:
+\begin{align*}
+\text{PDP:} \quad & f_{\text{PD}}(x_j) = \E_{X_{-j}}\big[\hat{f}(x_j, X_{-j})\big] \quad \text{(promedio sobre la marginal de } X_{-j}\text{)} \\[2pt]
+\text{Marginal:} \quad & f_{\text{M}}(x_j) = \E\big[\hat{f}(X) \,\big|\, X_j = x_j\big] \quad \text{(promedio sobre la condicional)} \\[2pt]
+\text{ALE:} \quad & f_{\text{ALE}}(x_j) = \int_{x_{\min}}^{x_j} \E\Big[ \frac{\partial \hat{f}(X)}{\partial X_j} \,\Big|\, X_j = z \Big]\, dz \;-\; \text{const.}
+\end{align*}
+\pause
+\begin{itemize}\itemsep1pt
+  \item El PDP extrapola: promedia sobre valores de $X_{-j}$ que no ocurren con ese $x_j$. El gráfico marginal no extrapola pero \emph{mezcla}: si $x_j$ y $x_k$ van juntas, el efecto de $x_k$ se cuela en la curva de $x_j$.
+  \item El ALE promedia la \textbf{derivada} condicionada a $X_j = z$ (no extrapola) y luego \textbf{acumula}; como deriva primero, el efecto de $x_k$ desaparece. En la práctica, diferencias dentro de $K$ franjas de $x_j$:
+  \[ \hat{f}_{\text{ALE}}(x_j) = \sum_{k=1}^{k(x_j)} \frac{1}{n_k} \sum_{i:\, x_{ij} \in \text{franja } k} \Big[ \hat{f}(z_k, x_{i,-j}) - \hat{f}(z_{k-1}, x_{i,-j}) \Big], \]
+  centrado en cero. Con predictores independientes, las tres curvas coinciden.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A5. Permutación condicional, por bloques y la importancia de Rashomon}
+\small
+\begin{itemize}\itemsep2pt
+  \item \textbf{Permutación condicional} (Strobl et al., 2008): permutar $x_j$ solo \emph{dentro} de grupos definidos por las variables correlacionadas con ella. Mide la importancia de $x_j$ \emph{dado} $x_{-j}$, como un coeficiente parcial; la incondicional mide la marginal. Preguntas distintas, ambas legítimas.
+  \item \textbf{Permutación por bloques:} permutar juntas las columnas de un bloque (las dos étnicas; los seis grupos de edad). Responde ``¿cuánto pierde el modelo sin este tipo de información?'' y evita el reparto entre gemelas.
+  \item \textbf{\emph{Leave-one-covariate-out}:} reajustar sin $x_j$ y comparar errores de prueba. No extrapola, pero cuesta $p$ ajustes y mide otra cosa: la pérdida cuando \emph{otro} modelo reemplaza a $x_j$ con sus proxies.
+  \item \textbf{Model class reliance} (Fisher, Rudin \& Dominici, 2019): el rango de importancias de $x_j$ entre todos los modelos casi óptimos (el conjunto Rashomon). Si incluye el cero, ningún dato obliga a usar $x_j$: ``el modelo necesita la etnia'' habla de este bosque, no del problema.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+%% End document
+\end{document}

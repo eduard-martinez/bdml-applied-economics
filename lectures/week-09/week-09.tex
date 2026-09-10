@@ -1,0 +1,511 @@
+\documentclass{beamer}
+
+%% Tema y configuraciones
+\usetheme{Boadilla}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=.,      % color de enlaces internos (índices, refs)
+    urlcolor=blue,    % color de URLs
+    citecolor=.,      % color de referencias bibliográficas
+}
+
+%% Helpers (macros y notación)
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\1}{\mathbb{I}}
+\newcommand{\MSE}{\mathrm{MSE}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+%% Encabezado
+\title[BDML]{Big Data y Machine Learning \\ para Economía Aplicada}
+\subtitle{Week 09: Texto como Datos y LLMs}
+\author{Eduard F. Martinez Gonzalez, Ph.D.}
+\institute[]{Departamento de Economía, Universidad Icesi}
+\date{\today}
+
+%%=================================================
+%% Begin document
+\begin{document}
+
+%%=================================================
+%% Primer slide
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%=================================================
+\begin{frame}{Previously\ldots\ (y logística de hoy)}
+\small
+El hilo de las últimas sesiones: \textbf{representar es comprimir con sentido} --- PCA lo hacía linealmente (S7); las redes componen representaciones cada vez más abstractas (S8).
+\pause
+
+\vspace{0.15cm}
+\begin{block}{Hoy: el dato más abundante de la economía --- el texto}
+\begin{enumerate}\itemsep2pt
+  \item \textbf{Texto clásico}: de documentos a matrices (bolsa de palabras, TF-IDF, sentimiento, tópicos).
+  \item \textbf{Embeddings}: palabras como vectores con geometría.
+  \item \textbf{Transformers y LLMs}: atención; \textbf{entrenaremos un GPT de juguete en vivo} y haremos \emph{fine-tuning} de un modelo abierto.
+  \item El LLM como \textbf{instrumento de medición} económica --- y sus riesgos.
+\end{enumerate}
+\end{block}
+\pause
+
+\vspace{0.15cm}
+\textbf{Logística:} la sesión corre en \textbf{Python sobre Colab} (GPU gratuita, cuadernos preparados) --- la excepción anunciada a ``R primero'': el ecosistema de LLMs vive en Python. No se asusten: el código está escrito; hoy se trata de \emph{entender} qué hace.
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 1: TEXTO CLÁSICO
+%%#################################################
+%%#################################################
+\section{Texto clásico: contar palabras con inteligencia}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{El texto es un dato económico de primera}
+\small
+\textbf{Qué hay en el texto que no hay en ninguna encuesta:}
+\begin{itemize}\itemsep4pt
+  \item \textbf{Comunicados y minutas} de bancos centrales: el tono de la política monetaria.
+  \item \textbf{Prensa}: incertidumbre económica, expectativas, narrativas.
+  \item \textbf{Informes corporativos, licitaciones, sentencias, redes sociales}: riesgo, corrupción, clima de negocios.
+\end{itemize}
+\pause
+
+\vspace{0.15cm}
+\textbf{El reto} (Gentzkow, Kelly \& Taddy, 2019): el texto es \emph{no estructurado} y de dimensión gigantesca. El flujo siempre es el mismo:
+
+\vspace{0.15cm}
+\begin{center}
+\begin{tikzpicture}[node distance=0.5cm, every node/.style={font=\scriptsize}]
+  \node (c) [draw, rounded corners, fill=gray!12, minimum height=0.7cm, text width=1.6cm, align=center] {corpus \\ (documentos)};
+  \node (r) [draw, rounded corners, fill=blue!10, right=0.4cm of c, minimum height=0.7cm, text width=2.2cm, align=center] {\textbf{representación} numérica};
+  \node (m) [draw, rounded corners, fill=red!10, right=0.4cm of r, minimum height=0.7cm, text width=2.6cm, align=center] {métodos del curso \\ (S2--S8)};
+  \node (a) [draw, rounded corners, fill=green!12, right=0.4cm of m, minimum height=0.7cm, text width=1.7cm, align=center] {medición / predicción};
+  \draw[-{Stealth}, thick] (c) -- (r);
+  \draw[-{Stealth}, thick] (r) -- (m);
+  \draw[-{Stealth}, thick] (m) -- (a);
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{block}{La clave de la sesión}
+Todo el problema está en la casilla azul: \textbf{cómo representar}. La historia de hoy es la evolución de esa casilla: contar $\rightarrow$ ponderar $\rightarrow$ \emph{embeddings} $\rightarrow$ atención.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La bolsa de palabras y la matriz documento--término}
+\small
+\textbf{El pipeline clásico:}
+\begin{enumerate}\itemsep3pt
+  \item \textbf{Tokenizar}: partir en palabras (o $n$-gramas: ``tasa de interés'').
+  \item \textbf{Normalizar}: minúsculas, tildes, raíces (\emph{stemming}); quitar \emph{stopwords} (``de'', ``la''\ldots).
+  \item \textbf{Contar}: la \textbf{matriz documento--término} $X$ ($n$ docs $\times$ $p$ términos): $x_{dt} = $ veces que el término $t$ aparece en el documento $d$.
+\end{enumerate}
+\pause
+
+\begin{itemize}\itemsep4pt
+  \item Se pierde el \textbf{orden} (``la banca quebró al gobierno'' $=$ ``el gobierno quebró a la banca''): por eso ``bolsa''. Aún así, para muchas tareas basta.
+  \item $p$ enorme (decenas de miles) y $X$ \textbf{ultra-esparsa}: ¡el hábitat natural de la sesión 3! \pause
+\end{itemize}
+
+\vspace{0.1cm}
+\textbf{Ponderar lo distintivo --- TF-IDF:}
+\[ w_{dt} \;=\; \underbrace{tf_{dt}}_{\text{frecuencia en } d} \times \underbrace{\log\big( N / df_t \big)}_{\text{rareza entre documentos}} \]
+un término pesa si es frecuente \emph{en este} documento y raro \emph{en los demás}. (``inflación'' en todos los comunicados: peso bajo; ``desanclaje'' en uno: peso alto.)
+\end{frame}
+
+%%=================================================
+\begin{frame}{Con la matriz en la mano, todo el curso aplica}
+\small
+La DTM convierte el texto en un problema que \textbf{ya sabemos resolver}:
+\begin{itemize}\itemsep5pt
+  \item \textbf{Clasificar} documentos (¿comunicado \emph{hawkish} o \emph{dovish}? ¿queja procedente?): logística penalizada o Naive Bayes --- el hábitat estrella de NB (S5), con Lasso para seleccionar términos (S3). \pause
+  \item \textbf{Sentimiento por diccionarios}: contar palabras positivas/negativas de una lista curada. La lección clave: el diccionario debe ser \textbf{del dominio} --- Loughran \& McDonald (2011) muestran que los diccionarios genéricos fallan en finanzas (``liability'' no es triste, es contabilidad). \pause
+  \item \textbf{Agrupar} documentos ($k$-means sobre TF-IDF, S7) o \textbf{reducir dimensión} (PCA/LSA sobre la DTM). \pause
+\end{itemize}
+
+\vspace{0.1cm}
+\begin{block}{Limitaciones honestas del conteo}
+Negación (``\emph{no} hay riesgo''), sarcasmo, contexto, polisemia. El conteo es un \textbf{proxy grueso}: barato, transparente, auditable --- y por eso sigue vivo. Cuando el matiz importa, seguimos avanzando.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Modelos de tópicos: LDA}
+\small
+\textbf{La pregunta:} ¿de qué \emph{temas} habla el corpus, sin decírselos de antemano? (No supervisado: la S7 en versión texto.)
+\pause
+
+\vspace{0.15cm}
+\textbf{El modelo generativo} (Blei, Ng \& Jordan, 2003), contado como historia:
+\begin{itemize}\itemsep3pt
+  \item Cada \textbf{tópico} $k$ es una distribución sobre palabras ($\beta_k$): el tópico ``inflación'' pone masa en \{precios, IPC, expectativas\ldots\}.
+  \item Cada \textbf{documento} $d$ es una mezcla de tópicos ($\theta_d$): 70\% inflación, 30\% empleo.
+  \item Cada palabra del documento se genera eligiendo un tópico de $\theta_d$ y una palabra de su $\beta_k$.
+\end{itemize}
+Estimar $=$ invertir la historia: encontrar los $\beta_k$ y $\theta_d$ que mejor explican lo observado.
+\pause
+
+\vspace{0.15cm}
+\begin{itemize}\itemsep4pt
+  \item \textbf{Lo que entrega}: tópicos interpretables (leyendo sus palabras top) $+$ la composición de cada documento --- series de tiempo de \emph{atención temática}.
+  \item \textbf{$K$ se elige} como siempre en no supervisado: coherencia, estabilidad, uso. \pause
+  \item \textbf{La aplicación canónica}: Hansen, McMahon \& Prat (2018, QJE) --- LDA sobre transcripciones del FOMC para medir cómo la \emph{transparencia} cambió la deliberación de los banqueros centrales.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 2: EMBEDDINGS
+%%#################################################
+%%#################################################
+\section{Embeddings: palabras con geometría}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{El defecto de nacimiento del conteo}
+\small
+En la DTM, cada palabra es una \textbf{columna independiente}: vectores ortogonales.
+\pause
+\begin{itemize}\itemsep5pt
+  \item Para la matriz, ``crisis'' y ``recesión'' son \textbf{tan distintas} entre sí como ``crisis'' y ``banano''. Ninguna noción de similitud. \pause
+  \item Consecuencia práctica: un clasificador entrenado con documentos que dicen ``recesión'' no aprende \emph{nada} sobre documentos que dicen ``contracción''. Desperdicio masivo de estructura. \pause
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{La salida --- la hipótesis distribucional} (Firth, 1957):
+\begin{center}
+\emph{``Conocerás una palabra por la compañía que mantiene.''}
+\end{center}
+Palabras que aparecen en \textbf{contextos similares} significan cosas similares. Entonces: aprendamos, para cada palabra, un \textbf{vector} tal que la geometría capture esa compañía.
+\pause
+
+\vspace{0.15cm}
+\begin{block}{¿Les suena el plan?}
+Es \textbf{reducción de dimensión con sentido} (S7): de la columna ortogonal ($p \sim 10^5$) a un vector denso ($\sim 300$) aprendido de los datos.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Word embeddings: word2vec y la geometría del significado}
+\small
+\textbf{word2vec} (Mikolov et al., 2013): entrenar una red mínima para \textbf{predecir el contexto} de cada palabra (o la palabra desde su contexto). Los pesos aprendidos \emph{son} los vectores.
+\pause
+
+\begin{itemize}\itemsep5pt
+  \item El subproducto vale más que la tarea: palabras de contextos parecidos terminan \textbf{cerca} en el espacio.
+  \item Y la geometría hace aritmética de significado:
+  \[ \vec{v}_{rey} - \vec{v}_{hombre} + \vec{v}_{mujer} \;\approx\; \vec{v}_{reina} \]
+  Direcciones del espacio capturan relaciones (género, capital--país, tiempo verbal). \pause
+  \item En economía: medir cercanía de industrias por descripciones, similitud de patentes, sesgos y estereotipos en prensa histórica, exposición de firmas a riesgos según sus informes. \pause
+\end{itemize}
+
+\vspace{0.1cm}
+\textbf{El límite de los embeddings estáticos:} una palabra $=$ \textbf{un} vector, siempre.
+\begin{itemize}\itemsep3pt
+  \item ``El \textbf{banco} subió la tasa'' vs.\ ``se sentó en el \textbf{banco} de la plaza'': mismo vector, significados distintos.
+  \item Necesitamos representaciones que dependan del \textbf{contexto de cada aparición}. Ese es exactamente el salto de 2017.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 3: TRANSFORMERS Y LLMS
+%%#################################################
+%%#################################################
+\section{Transformers y LLMs}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Atención: representaciones que se construyen en contexto}
+\small
+\textbf{La idea} (Vaswani et al., 2017, \emph{Attention Is All You Need}), sin la parafernalia:
+\begin{itemize}\itemsep4pt
+  \item Cada palabra empieza con su embedding\ldots\ y luego lo \textbf{actualiza mirando a las demás palabras de la frase}.
+  \item La actualización es un \textbf{promedio ponderado} de (transformaciones de) los vectores de las otras palabras.
+  \item Los \textbf{pesos} los calcula la propia red: cuánto ``atiende'' cada palabra a cada otra --- compatibilidad entre lo que una \emph{busca} y lo que otra \emph{ofrece}, pasada por un \textbf{softmax} (S5).
+\end{itemize}
+\pause
+
+\vspace{0.1cm}
+En ``el \textbf{banco} subió la \emph{tasa}'', el vector de ``banco'' atiende fuerte a ``tasa'' $\Rightarrow$ su representación final es inequívocamente financiera. Polisemia: resuelta por construcción.
+\pause
+
+\vspace{0.15cm}
+\begin{itemize}\itemsep4pt
+  \item \textbf{En una frase para economistas:} la atención es una \emph{regresión ponderada que la red aprende a ejecutar}, con pesos distintos para cada palabra en cada frase.
+  \item Un \textbf{transformer} $=$ muchas atenciones en paralelo (\emph{heads}), apiladas en capas (¡composición, S8!), con las representaciones refinándose capa a capa.
+\end{itemize}
+\pause
+
+\begin{block}{Por qué destronó a todo lo anterior}
+Paraleliza perfecto en GPU (no procesa palabra por palabra) y conecta cualquier par de posiciones a distancia 1. Escalar se volvió cuestión de presupuesto.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Qué es, entonces, un LLM?}
+\small
+\textbf{Definición sin humo:} un transformer \textbf{gigante} entrenado para \textbf{predecir la siguiente palabra} en corpus masivos de texto.
+\pause
+
+\begin{itemize}\itemsep5pt
+  \item La pérdida es la \emph{cross-entropy} de la sesión 5 --- máxima verosimilitud sobre el vocabulario, palabra por palabra, billones de veces.
+  \item El optimizador es el SGD/Adam de la sesión 8. La arquitectura, la atención de hace una diapositiva. \textbf{No hay ingredientes nuevos: hay escala.} \pause
+  \item Lo sorprendente (y aún debatido): de esa tarea humilde \textbf{emergen} capacidades --- sintaxis, hechos, traducción, razonamiento aparente --- porque predecir bien la siguiente palabra de \emph{todo} lo escrito exige modelar mucho del mundo que lo escribió. \pause
+\end{itemize}
+
+\vspace{0.1cm}
+\begin{block}{Desmitificación operativa}
+Cuando un LLM ``responde'', está muestreando, palabra por palabra, de $P(\text{siguiente} \mid \text{todo lo anterior})$. Toda su magia y todos sus defectos (alucinaciones incluidas) salen de ahí: es un \textbf{modelo de la distribución del texto}, no un consultor de la verdad.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{DEMO 1: entrenemos un GPT de juguete, en vivo}
+\framesubtitle{Todo el curso en una pantalla (nanoGPT, Colab, $\sim$10 minutos)}
+\small
+\textbf{El experimento} (cuaderno preparado, corpus: comunicados del Banco de la República):
+\begin{enumerate}\itemsep3pt
+  \item Un transformer \textbf{minúsculo} ($\sim$10M de parámetros, nivel de caracteres).
+  \item Entrenarlo unos minutos en la GPU gratuita de Colab, mirando dos cosas: la \textbf{pérdida} cayendo y \textbf{muestras de texto} generadas cada pocos pasos.
+\end{enumerate}
+\pause
+
+\vspace{0.15cm}
+\textbf{Lo que van a ver} (y por qué es el examen final conceptual del curso):
+\begin{itemize}\itemsep4pt
+  \item Minuto 0: sopa de caracteres aleatorios. Minuto 2: ``palabras'' en español inventado. Minuto 8: sintaxis de comunicado de banco central, plausible y vacía. \pause
+  \item En la pantalla están \textbf{todas} las piezas: embeddings (S9), softmax y cross-entropy (S5), mini-batches y Adam (S8), la curva de pérdida train vs.\ validación separándose --- \textbf{el sobreajuste de la sesión 1, en vivo} --- y el early stopping como respuesta (S8). \pause
+\end{itemize}
+
+\begin{block}{El punto pedagógico}
+Un LLM no es magia: es \textbf{este mismo cuaderno con $10^5$ veces más de todo}. Quien entiende el juguete, entiende el juguete grande.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Del pretraining al modelo útil (y la cuestión abierta/cerrada)}
+\small
+\textbf{El modelo base solo completa texto.} Para volverlo útil:
+\begin{itemize}\itemsep4pt
+  \item \emph{Fine-tuning} supervisado con ejemplos de instrucciones y buenas respuestas.
+  \item Alineación con preferencias humanas (RLHF y variantes) --- una línea hoy; no es nuestro foco.
+\end{itemize}
+\pause
+
+\vspace{0.15cm}
+\textbf{La distinción que importa para investigación:}
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lll}
+\hline
+ & Modelos \textbf{abiertos} (pesos descargables) & Modelos \textbf{cerrados} (API) \\
+\hline
+Reproducibilidad & total (versión congelada) & frágil (el modelo cambia) \\
+Datos sensibles & se quedan en tu máquina & viajan a un tercero \\
+Adaptación & \emph{fine-tuning} completo & limitada \\
+Capacidad tope & alta y subiendo & la frontera \\
+Costo & GPU propia o Colab & por token \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+
+\vspace{0.15cm}
+Para \textbf{medición económica seria} --- replicable, auditable, con microdatos --- los modelos abiertos pequeños y medianos son la herramienta de trabajo. Y adaptarlos es más barato de lo que creen\ldots
+\end{frame}
+
+%%=================================================
+\begin{frame}{DEMO 2: fine-tuning eficiente con LoRA}
+\framesubtitle{Adaptar un modelo abierto a una tarea económica, en Colab}
+\small
+\textbf{El problema de ajustar un LLM:} tocar miles de millones de parámetros no cabe en ninguna GPU académica.
+\pause
+
+\vspace{0.15cm}
+\textbf{LoRA} (Hu et al., 2021) --- la idea en dos líneas:
+\begin{itemize}\itemsep4pt
+  \item \textbf{Congelar} los pesos $W$ del modelo; aprender solo una corrección de \textbf{rango bajo}: $\Delta W = B A$, con $A, B$ delgadísimas (rango $r \sim 8$--$16$).
+  \item Parámetros entrenables: $< 1\%$ del total $\Rightarrow$ cabe en Colab. (¿Rango bajo como compresión con sentido? La S7 aprueba.)
+\end{itemize}
+\pause
+
+\vspace{0.15cm}
+\textbf{La demo:} clasificar comunicados de banca central como \emph{hawkish} / \emph{dovish} / neutral:
+\begin{enumerate}\itemsep3pt
+  \item Modelo abierto pequeño ($\sim$1--3B) $+$ LoRA sobre unos cientos de ejemplos etiquetados.
+  \item Comparar contra las líneas base del curso: diccionarios (hoy) y logística sobre TF-IDF (S5) --- \textbf{mismo test set, misma vara} (S1--S2, siempre).
+\end{enumerate}
+\pause
+
+\begin{block}{El mensaje de método}
+El LLM no reemplaza el pipeline honesto: \textbf{entra en él} como un clasificador más --- uno que llega sabiendo español y economía, y por eso necesita pocos ejemplos.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La tercera vía: el LLM como instrumento de medición}
+\small
+Sin entrenar nada, un LLM ya sirve para \textbf{producir variables} (Korinek, 2023; Dell, 2025):
+\begin{itemize}\itemsep4pt
+  \item \textbf{Etiquetar a escala} (\emph{zero/few-shot}): clasificar 200.000 noticias por tema/tono con un prompt --- lo que antes exigía un ejército de asistentes.
+  \item \textbf{Extraer estructura}: convertir sentencias, contratos o licitaciones en tablas (partes, montos, fechas).
+  \item \textbf{Embeddings de documentos} como covariables o para medir similitud (firmas, políticas, discursos).
+\end{itemize}
+\pause
+
+\vspace{0.15cm}
+\textbf{Las reglas del oficio (no negociables):}
+\begin{enumerate}\itemsep4pt
+  \item \textbf{Validar contra humanos}: etiquetar a mano una muestra y reportar el acuerdo --- el LLM es un \textbf{proxy} y se audita como tal (S7--S8).
+  \item \textbf{Reproducibilidad}: fijar modelo y versión, temperatura 0, publicar los prompts; preferir modelos abiertos congelados.
+  \item \textbf{Ojo con la contaminación temporal}: el modelo ``ya leyó'' el futuro de sus datos históricos --- fatal para ejercicios de predicción retrospectiva (\emph{lookahead bias}).
+\end{enumerate}
+\pause
+
+\begin{block}{Y la coherencia con la política del curso}
+Declarar qué modelo se usó y para qué --- la misma regla de su syllabus, elevada a estándar de investigación.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 4: SÍNTESIS Y CIERRE
+%%#################################################
+%%#################################################
+\section{El texto en la economía: síntesis y cierre del curso}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{El estante de aplicaciones (para sus proyectos y sus tesis)}
+\small
+\begin{itemize}\itemsep5pt
+  \item \textbf{Incertidumbre de política económica} (Baker, Bloom \& Davis, 2016, QJE): el índice EPU --- conteo disciplinado de prensa --- hoy citado en miles de papers y replicado por países. La prueba de que \emph{contar bien} ya es una contribución. \pause
+  \item \textbf{Deliberación en el FOMC} (Hansen, McMahon \& Prat, 2018, QJE): LDA $+$ diseño cuasiexperimental --- texto \emph{y} causalidad en el mismo paper. \pause
+  \item \textbf{La voz de la política monetaria} (Gorodnichenko, Pham \& Talavera, 2023, AER): el \emph{tono vocal} de los anuncios de la Fed, medido con deep learning, mueve mercados --- datos no estructurados más allá del texto escrito. \pause
+  \item \textbf{El survey de la casa}: Ash \& Hansen (2023, \emph{Annual Review}): el estado del arte de texto-como-datos en economía, de conteos a LLMs.
+\end{itemize}
+\pause
+
+\vspace{0.1cm}
+\begin{block}{Patrón de los cuatro}
+Ninguno ``usa IA'' como adorno: en todos, el texto \textbf{mide algo} que antes no se podía medir, y esa medición alimenta una pregunta económica clásica.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Recap de la sesión}
+\small
+\begin{enumerate}\itemsep5pt
+  \item \textbf{Texto clásico}: tokenizar $\rightarrow$ DTM $\rightarrow$ TF-IDF; con la matriz, todo el curso aplica (NB, Lasso, $k$-means). Diccionarios: del dominio o nada (Loughran--McDonald). LDA para tópicos: no supervisado en versión texto.
+  \item \textbf{Embeddings}: la hipótesis distribucional vuelve vectores a las palabras; geometría con significado; su límite: un vector por palabra.
+  \item \textbf{Atención/transformers}: representaciones construidas \emph{en contexto} --- una regresión ponderada que la red aprende; apilada en capas, escala sin límite aparente.
+  \item \textbf{LLM} $=$ transformer gigante $+$ predecir-la-siguiente-palabra $+$ cross-entropy $+$ Adam. Sin ingredientes nuevos: escala. El juguete que entrenamos ES el modelo grande, dividido por $10^5$.
+  \item \textbf{LoRA}: adaptar modelos abiertos con $<1\%$ de parámetros --- el LLM como un clasificador más \emph{dentro} del pipeline honesto.
+  \item \textbf{LLM como instrumento de medición}: etiquetar/extraer/representar a escala --- validando contra humanos, congelando versiones, publicando prompts.
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}
+\vspace{2.0cm}
+\Large{Cierre del curso\ldots}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El curso en una diapositiva (la de verdad)}
+\small
+\begin{enumerate}\itemsep4pt
+  \item \textbf{S1}: generalizar es el problema; $\MSE = \text{sesgo}^2 + \text{varianza} + \sigma^2$.
+  \item \textbf{S2}: medir honestamente (CV) y encoger con criterio (Ridge/Lasso).
+  \item \textbf{S3}: la teoría del Lasso --- y ``selecciona predictores, no causas''.
+  \item \textbf{S4}: árboles y ensambles --- promediar mata varianza, sumar mata sesgo.
+  \item \textbf{S5}: clasificar es decidir --- el umbral es economía, no estadística.
+  \item \textbf{S6}: la predicción al servicio de $\beta$ --- DML y \emph{causal forests}.
+  \item \textbf{S7}: sin $y$: representar es comprimir con sentido.
+  \item \textbf{S8}: redes --- composición de representaciones; ver desde el cielo.
+  \item \textbf{S9}: el texto como dato; los LLMs como la misma maquinaria, escalada.
+\end{enumerate}
+\pause
+
+\vspace{0.15cm}
+\begin{block}{Los tres mandamientos que se llevan}
+\textbf{(1)} Evaluar fuera de muestra, siempre, con el pipeline honesto. \textbf{(2)} Identificar antes de estimar: el diseño no se delega al algoritmo. \textbf{(3)} Toda medición por ML es un proxy: se valida, se declara, se audita.
+\end{block}
+\pause
+
+\vspace{0.1cm}
+\centering
+Fue un gusto. Ahora: \textbf{sus proyectos} \emph{(presentaciones a continuación)}.
+\end{frame}
+
+%%=================================================
+\begin{frame}{Logística final}
+\small
+\textbf{Hoy, después del descanso:} presentaciones de los proyectos finales (el 30\% del proyecto) --- orden y tiempos publicados en Intu.
+\pause
+
+\vspace{0.2cm}
+\textbf{Para profundizar en lo de hoy (lecturas de despedida):}
+\begin{itemize}\itemsep4pt
+  \item Gentzkow, Kelly \& Taddy (2019), \emph{Text as Data}, JEL --- el mapa clásico.
+  \item Korinek (2023), \emph{Generative AI for Economic Research}, JEL --- el manual de uso para investigadores (se actualiza en línea).
+  \item Dell (2025), \emph{Deep Learning for Economists}, JEL --- el puente definitivo entre las sesiones 8 y 9 y su investigación.
+\end{itemize}
+\pause
+
+\vspace{0.2cm}
+\textbf{Entrega final del proyecto:} reporte (máx.\ 10 páginas) $+$ repositorio reproducible, en las fechas publicadas en Intu. La \textbf{declaración de uso de IA} va en la primera página del reporte.
+\pause
+
+\vspace{0.2cm}
+\centering \textbf{Gracias por el semestre.}
+\end{frame}
+
+%%=================================================
+%% Referencias
+\begin{frame}{Referencias esenciales}
+\footnotesize
+\begin{itemize}\itemsep2pt
+  \item Gentzkow, M., Kelly, B., \& Taddy, M. (2019). Text as Data. \emph{JEL}, 57(3), 535--574.
+  \item Loughran, T., \& McDonald, B. (2011). When Is a Liability Not a Liability? \emph{Journal of Finance}, 66(1), 35--65.
+  \item Blei, D., Ng, A., \& Jordan, M. (2003). Latent Dirichlet Allocation. \emph{JMLR}, 3, 993--1022.
+  \item Mikolov, T., et al.\ (2013). Distributed Representations of Words and Phrases. \emph{NeurIPS}.
+  \item Vaswani, A., et al.\ (2017). Attention Is All You Need. \emph{NeurIPS}.
+  \item Hu, E., et al.\ (2021). LoRA: Low-Rank Adaptation of Large Language Models. \emph{arXiv:2106.09685}.
+  \item Baker, S., Bloom, N., \& Davis, S. (2016). Measuring Economic Policy Uncertainty. \emph{QJE}, 131(4), 1593--1636.
+  \item Hansen, S., McMahon, M., \& Prat, A. (2018). Transparency and Deliberation within the FOMC. \emph{QJE}, 133(2), 801--870.
+  \item Gorodnichenko, Y., Pham, T., \& Talavera, O. (2023). The Voice of Monetary Policy. \emph{AER}, 113(2), 548--584.
+  \item Ash, E., \& Hansen, S. (2023). Text Algorithms in Economics. \emph{Annual Review of Economics}, 15, 659--688.
+  \item Korinek, A. (2023). Generative AI for Economic Research. \emph{JEL}, 61(4), 1281--1317.
+  \item Dell, M. (2025). Deep Learning for Economists. \emph{JEL}, 63(1), 5--58.
+\end{itemize}
+\normalsize
+\end{frame}
+
+%%=================================================
+%% End document
+\end{document}

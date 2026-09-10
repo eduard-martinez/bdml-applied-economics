@@ -1,0 +1,966 @@
+\documentclass{beamer}
+
+%% Tema y configuraciones
+\usetheme{Boadilla}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=.,      % color de enlaces internos (índices, refs)
+    urlcolor=blue,    % color de URLs
+    citecolor=.,      % color de referencias bibliográficas
+}
+
+%% Helpers (macros y notación)
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\1}{\mathbb{I}}
+\newcommand{\MSE}{\mathrm{MSE}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+%% Encabezado
+\title[BDML]{Big Data y Machine Learning \\ para Economía Aplicada}
+\subtitle{Week 03: Clasificación --- de la logística a las métricas que deciden}
+\author{Eduard F. Martinez Gonzalez, Ph.D.}
+\institute[]{Departamento de Economía, Universidad Icesi}
+\date{\today}
+
+%%=================================================
+%% Begin document
+\begin{document}
+
+%%=================================================
+%% Primer slide
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%=================================================
+\begin{frame}{Previously\ldots}
+\small
+\begin{itemize}\itemsep5pt
+  \item \textbf{OLS como máquina de predecir:} las variables se eligen por error de prueba; el modelo lineal es el \emph{baseline} contra el que todo lo demás se mide. \pause
+  \item \textbf{Flexibilidad controlada:} interacciones, \emph{splines}, GAM y $k$-NN bajan el sesgo y pagan con varianza; en alta dimensión los vecinos dejan de ser vecinos. \pause
+  \item \textbf{Evaluar una regresión:} RMSE, MAE y $R^2$ de prueba, siempre contra un baseline; predicho vs.\ observado, error por decil y por subgrupo. \pause
+  \item \textbf{Reglas de oro:} \#1 el error de entrenamiento es optimista; \#2 la prueba se usa al final y una sola vez. \pause
+  \item Quedó una pregunta anotada en la presentación de Kim \& Zilinsky: ¿por qué la AUC sube con las décadas y la \emph{accuracy} no?
+\end{itemize}
+\pause
+\vspace{0.1cm}
+\begin{block}{Hoy}
+$y$ es una \textbf{categoría}. Cambian el modelo (logística en vez de OLS), el objeto que se predice (una probabilidad y, con ella, una decisión) y, sobre todo, la evaluación: con clases desbalanceadas y errores de costo distinto, \textbf{elegir la métrica y el umbral es la decisión económica}.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 1: CUANDO Y ES UNA CATEGORÍA
+%%#################################################
+%%#################################################
+\section{Cuando $y$ es una categoría}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Qué cambia cuando $y$ es una categoría}
+\small
+\textbf{Las preguntas del curso, en versión binaria:} ¿ganó el eventual presidente en la mesa? ¿El hogar está en pobreza extrema? ¿El crédito se paga? ¿El estudiante deserta? ¿El avalúo supera el precio de venta?
+\pause
+\vspace{0.15cm}
+Ahora $y \in \{0, 1\}$ (o $K$ clases) y queremos dos objetos, relacionados pero distintos:
+\begin{itemize}\itemsep4pt
+  \item La \textbf{probabilidad} $p(x) = P(y = 1 \mid X = x)$: es la media condicional de una variable binaria, así que todo lo de la sesión 1 sigue en pie.
+  \item Una \textbf{decisión} $\hat{y}(x) \in \{0, 1\}$, que exige además un \textbf{umbral}: predecir 1 si $\hat{p}(x) \geq \tau$.
+\end{itemize}
+\pause
+\vspace{0.15cm}
+La pérdida natural es la 0--1 de la sesión 1, $L = \1\{y \neq \hat{y}\}$, cuyo promedio es la tasa de error. Pero un falso positivo y un falso negativo casi nunca cuestan lo mismo: de ahí sale toda la segunda mitad de la clase.
+\pause
+\vspace{0.15cm}
+\begin{block}{El plan}
+Un modelo para $p(x)$ (la logística y sus alternativas) $\rightarrow$ de la probabilidad a la decisión $\rightarrow$ las métricas que deciden $\rightarrow$ la aplicación con las mesas electorales.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Por qué no OLS: el modelo de probabilidad lineal como predictor}
+\framesubtitle{ISL, sección 4.2}
+\small
+\begin{columns}[T]
+\begin{column}{0.46\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.56]
+  \draw[->] (0,-1.1) -- (0,3.7) node[above, font=\scriptsize] {$p(x)$};
+  \draw[->] (0,0) -- (6.9,0) node[right, font=\scriptsize] {$x$};
+  \draw[dashed, gray] (0,3) -- (6.6,3); \node[font=\scriptsize, gray] at (-0.4,3) {$1$};
+  \node[font=\scriptsize, gray] at (-0.4,0) {$0$};
+  \foreach \px in {0.4, 0.8, 1.3, 1.7, 2.2, 2.8, 3.4, 4.1} \fill[black] (\px,0) circle (2.2pt);
+  \foreach \px in {2.5, 3.1, 3.7, 4.3, 4.8, 5.3, 5.8, 6.2} \fill[black] (\px,3) circle (2.2pt);
+  \draw[red, very thick] (0,-0.9) -- (6.5,3.98);
+  \draw[blue, very thick] plot[smooth] coordinates {(0,0.015) (1,0.075) (2,0.33) (2.5,0.66) (3,1.14) (3.3,1.5) (3.6,1.86) (4,2.25) (4.5,2.61) (5,2.82) (6,2.96) (6.5,2.98)};
+  \node[font=\scriptsize, red] at (4.3,3.6) {LPM};
+  \node[font=\scriptsize, blue] at (4.9,1.3) {logística};
+  \node[font=\scriptsize, gray] at (1.5,-0.75) {$\hat{p} < 0$};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.54\textwidth}
+\vspace{0.05cm}
+\begin{itemize}\itemsep3pt
+  \item Regresar la \emph{dummy} sobre $x$ es el \textbf{modelo de probabilidad lineal} (LPM). Estima bien la pendiente promedio\ldots
+  \item \ldots pero como \textbf{predictor} entrega $\hat{p} < 0$ y $\hat{p} > 1$, con las que no se puede decidir con umbrales ni hablar de calibración.
+  \item Con $K > 2$ clases codificadas $1, 2, 3$ impone un orden que no existe.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\begin{block}{$Y$, no $\beta$, otra vez}
+Para estimar un \emph{efecto marginal promedio} el LPM es legítimo, y ustedes lo usan en Inferencia Causal. Hoy el objetivo es otro: \textbf{probabilidades calibradas para clasificar y decidir}.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El clasificador de Bayes: el ideal y su error}
+\small
+Si conociéramos las probabilidades verdaderas, la regla que minimiza la tasa de error es asignar cada $x$ a su clase \textbf{más probable}:
+\[ \hat{y}^{\,\text{Bayes}}(x) \;=\; \argmax_{k} \; P(y = k \mid X = x) \qquad (\text{binario: } 1 \text{ si } p(x) \geq 0{,}5). \]
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Frontera de Bayes:} el conjunto donde hay empate ($p(x) = 0{,}5$); a un lado se predice 1, al otro 0. \pause
+  \item \textbf{Error de Bayes:} el error de esta regla ideal. Es positivo siempre que las clases se \emph{traslapen}: mesas idénticas en $X$ con ganadores distintos; es el análogo del $\sigma^2$ irreducible de la sesión 1, el piso que ningún método perfora. \pause
+  \item Nadie conoce $P(y \mid x)$: \textbf{cada clasificador es una manera distinta de estimarla} a partir de datos (o de estimar directamente la frontera).
+\end{itemize}
+\pause
+\begin{block}{Consecuencia para la evaluación}
+Si el error de Bayes es 15\%, pedir 95\% de acierto es pedir magia. La pregunta útil no es ``¿acierta mucho?'' sino ``¿cuánto mejor que el baseline, y en qué clase falla?''.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 2: LA REGRESIÓN LOGÍSTICA
+%%#################################################
+%%#################################################
+\section{La regresión logística}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Regresión logística: el modelo}
+\framesubtitle{Una recta para los \emph{log-odds}, una curva en S para la probabilidad}
+\small
+Modelar la probabilidad con una función que \textbf{vive en $[0,1]$}:
+\[ p(x) \;=\; \frac{e^{x'\beta}}{1 + e^{x'\beta}} \qquad \Longleftrightarrow \qquad \underbrace{\log \frac{p(x)}{1 - p(x)}}_{\text{log-odds}} \;=\; x'\beta \]
+\begin{center}
+\begin{tikzpicture}[scale=0.5]
+  \draw[->] (-4.1,0) -- (4.3,0) node[right, font=\scriptsize] {$x'\beta$};
+  \draw[->] (0,-0.15) -- (0,3.4) node[above, font=\scriptsize] {$p(x)$};
+  \draw[dashed, gray] (-4,1.5) -- (4,1.5); \node[font=\scriptsize, gray] at (-4.5,1.5) {$0{,}5$};
+  \draw[dashed, gray] (-4,3.0) -- (4,3.0); \node[font=\scriptsize, gray] at (-4.35,3.0) {$1$};
+  \draw[blue, very thick] plot[smooth] coordinates {(-4,0.05) (-3,0.14) (-2,0.36) (-1,0.81) (0,1.5) (1,2.19) (2,2.64) (3,2.86) (4,2.95)};
+  \node[font=\scriptsize, gray] at (1.7,0.45) {frontera: $x'\beta = 0$};
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep2pt
+  \item El índice es lineal $\Rightarrow$ la frontera $p(x) = 0{,}5 \iff x'\beta = 0$ es un \textbf{hiperplano}: la logística separa con una recta, como OLS ajusta con una recta.
+  \item \textbf{Parámetros:} $\beta$. \textbf{Hiperparámetros:} ninguno; la flexibilidad viene de interacciones y \emph{splines} (sesión 2) o de una penalización (sesión 5).
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cómo se ajusta: máxima verosimilitud en una línea}
+\small
+Se eligen los $\beta$ que hacen \textbf{más probable lo observado}: $p_i$ alta para los unos y baja para los ceros ($p_i \equiv p(x_i)$):
+\[ \hat{\beta} \;=\; \argmax_{\beta} \; \ell(\beta), \qquad \ell(\beta) = \sum_{i=1}^{n} \Big[ y_i \log p_i + (1 - y_i) \log (1 - p_i) \Big]. \]
+\pause
+\begin{itemize}\itemsep4pt
+  \item No hay solución cerrada: $\ell$ es cóncava y \texttt{glm()} la maximiza por Newton--Raphson en milisegundos. El gradiente, $\sum_i x_i (y_i - p_i)$, está en el apéndice y reaparece en el \emph{boosting} de la sesión 6. \pause
+  \item $-\ell(\beta)/n$ es la \textbf{log-loss}: la pérdida que la logística minimiza es también una métrica que reportaremos. \pause
+  \item \textbf{Separación perfecta:} si una variable separa las clases sin error, $\hat{\beta} \to \infty$ y \texttt{glm()} avisa. Casi siempre es \emph{leakage} (una variable que ya contiene a $y$) o una señal de que hay que regularizar: la logística \textbf{penalizada} de la sesión 5.
+\end{itemize}
+\pause
+\begin{block}{Lo que hay que retener}
+La logística es el OLS de las probabilidades: lineal en el índice, sin perillas, estable, rápida y razonablemente calibrada. Es el \textbf{baseline de clasificación} del curso.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cómo leer la logística (y qué no leer en ella)}
+\small
+\begin{itemize}\itemsep5pt
+  \item $e^{\beta_j}$ es el \textbf{\emph{odds ratio}}: cuánto se multiplican las chances $p/(1-p)$ por una unidad más de $x_j$. Es lo que ya conocen de Econometría II. \pause
+  \item El efecto sobre la \textbf{probabilidad} no es constante: $\partial p / \partial x_j = \beta_j\, p\,(1-p)$, máximo en $p = 0{,}5$ y casi nulo en las colas. Una misma variable mueve mucho a las mesas ``indecisas'' y nada a las seguras. \pause
+  \item Para \textbf{predecir}, lo que importa es $\hat{p}(x)$ completo, no un coeficiente: variables ``no significativas'' pueden mejorar la AUC en la prueba, y significativas pueden no mover nada. \pause
+\end{itemize}
+\vspace{0.1cm}
+\begin{block}{Significativo no es predictivo, versión clasificación}
+En Kim \& Zilinsky (2024) el logit del voto sobre demografía tiene coeficientes significativos y crecientes, y acierta el 64\% fuera de muestra, década tras década. Los coeficientes dicen \emph{qué usa} el modelo; la prueba dice \emph{cuánto sabe}.
+\end{block}
+\pause
+\vspace{0.1cm}
+\textcolor{gray}{Hoy leemos $\hat{\beta}$ para entender qué hace el modelo, no para estimar efectos causales. Las herramientas para ``abrir'' modelos que no tienen coeficientes llegan en la sesión 7.}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Más de dos clases (y una nota sobre conteos)}
+\small
+\textbf{Logística multinomial} (ISL 4.3.5): con $K$ clases, un índice lineal por clase y una normalización que reparte la probabilidad:
+\[ P(y = k \mid x) \;=\; \frac{e^{x'\beta_k}}{\sum_{l=1}^{K} e^{x'\beta_l}} \qquad (\text{la función \emph{softmax}}), \]
+con una clase de referencia cuyo $\beta$ se fija en cero; los demás se leen \emph{relativos} a ella. Ejemplo: ¿cuál de los tres candidatos principales gana la mesa?
+\pause
+\begin{itemize}\itemsep4pt
+  \item Categorías \textbf{ordenadas} (estrato, nivel educativo): logit ordenado, o tratar la escala como numérica y volver a la sesión 2. Las métricas de hoy se extienden clase por clase (``una contra el resto''). \pause
+  \item \textbf{Conteos} (delitos por cuadrante, siniestros): regresión de Poisson, $\log \E[y \mid x] = x'\beta$, otro GLM (ISL 4.6). Misma lógica: una función de enlace que respeta el soporte de $y$.
+\end{itemize}
+\pause
+\begin{block}{Para hoy}
+Nos quedamos en el caso binario: es donde viven las decisiones (aprobar, focalizar, alertar) y donde las métricas tienen más que enseñar.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 3: OTROS CLASIFICADORES, EN BREVE
+%%#################################################
+%%#################################################
+\section{Otros clasificadores, en breve}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Modelos generativos: LDA, QDA y Naive Bayes}
+\small
+\begin{columns}[T]
+\begin{column}{0.44\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.48]
+  \draw[->] (0,0) -- (7.0,0) node[right, font=\scriptsize] {$x$};
+  \draw[->] (0,0) -- (0,2.8);
+  \draw[blue, very thick] plot[smooth] coordinates {(0,0.10) (0.5,0.38) (1.0,1.01) (1.5,1.81) (2.0,2.2) (2.5,1.81) (3.0,1.01) (3.5,0.38) (4.0,0.10) (4.5,0.02)};
+  \draw[red, very thick] plot[smooth] coordinates {(2.0,0.03) (2.5,0.17) (3.0,0.52) (3.5,1.09) (4.0,1.55) (4.2,1.6) (4.5,1.49) (5.0,0.97) (5.5,0.43) (6.0,0.13) (6.5,0.03)};
+  \draw[dashed, gray, thick] (3.2,0) -- (3.2,2.45);
+  \node[font=\scriptsize, gray] at (3.2,2.8) {frontera};
+  \node[font=\scriptsize, blue] at (0.9,2.5) {$\pi_0 f_0(x)$};
+  \node[font=\scriptsize, red] at (5.6,1.9) {$\pi_1 f_1(x)$};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.56\textwidth}
+\vspace{0.05cm}
+La logística modela $P(y \mid x)$ directamente. La alternativa \emph{generativa}: modelar cómo se distribuye $x$ en cada clase, $f_k(x)$, y las proporciones $\pi_k$, y voltear con Bayes:
+\[ P(y = k \mid x) \;\propto\; \pi_k \, f_k(x). \]
+\end{column}
+\end{columns}
+\pause
+\begin{itemize}\itemsep2pt
+  \item \textbf{LDA:} $f_k$ normal con la \textbf{misma covarianza} en todas las clases $\Rightarrow$ frontera lineal, como la logística; gana con $n$ pequeño y clases bien separadas. \textbf{QDA:} una covarianza por clase $\Rightarrow$ frontera cuadrática: más flexible, más parámetros.
+  \item \textbf{Naive Bayes:} supone las $x$ \textbf{independientes dentro de cada clase}, $f_k(x) = \prod_j f_{kj}(x_j)$. Es falso y aun así funciona cuando $p$ es enorme y los datos escasos: el filtro de spam. \pause
+\end{itemize}
+\begin{block}{Mapa mental}
+Más supuestos $=$ más eficiencia \emph{si} aguantan; con $n$ grande y sin normalidad, la logística es más robusta. Fórmulas en el apéndice.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{$k$-NN como clasificador: votar entre vecinos}
+\small
+\begin{columns}[T]
+\begin{column}{0.42\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.45]
+  \draw[->] (0,0) -- (6.2,0) node[right, font=\scriptsize] {$x_1$};
+  \draw[->] (0,0) -- (0,5.3) node[above, font=\scriptsize] {$x_2$};
+  \foreach \px/\py in {0.5/0.8, 0.9/2.1, 1.3/3.5, 1.6/1.2, 1.9/2.8, 2.2/4.0, 0.7/3.9, 2.5/1.9, 1.1/0.4, 2.9/3.4, 1.0/4.5} \fill[blue] (\px,\py) circle (2.4pt);
+  \foreach \px/\py in {3.6/0.6, 4.2/1.8, 4.8/3.2, 3.9/3.9, 5.3/0.9, 5.6/2.6, 4.5/4.3, 3.3/1.3, 2.7/0.6, 5.0/4.6, 3.5/2.6} \fill[red] (\px,\py) circle (2.4pt);
+  \draw[black, thick] plot[smooth, tension=0.9] coordinates {(2.3,0.1) (2.5,1.1) (3.1,1.8) (2.7,2.7) (3.3,3.1) (2.6,3.9) (3.4,4.6) (3.2,5.1)};
+  \draw[gray, dashed, thick] (2.5,0.1) -- (3.4,5.1);
+  \node[font=\scriptsize] at (4.6,5.05) {$k$ pequeño};
+  \node[font=\scriptsize, gray] at (1.3,5.05) {$k$ grande};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.58\textwidth}
+\vspace{0.05cm}
+Para clasificar $x_0$, mirar sus $k$ vecinos más cercanos y \textbf{votar}:
+\[ \hat{p}(x_0) = \frac{1}{k} \sum_{i \in N_k(x_0)} y_i, \qquad \hat{y}(x_0) = \1\{\hat{p}(x_0) \geq \tau\}. \]
+\begin{itemize}\itemsep3pt
+  \item Es el $k$-NN de la sesión 2 con $y$ binaria: la fracción de vecinos con $y = 1$.
+  \item $k$ es la \textbf{perilla de complejidad} (la curva U): $k = 1$ memoriza; $k = n$ predice siempre la mayoría.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.05cm}
+\begin{itemize}\itemsep3pt
+  \item Sin fórmula y sin supuestos: la frontera la dibujan los datos, tan rugosa como $k$ lo permita. Requiere \textbf{estandarizar} y sufre de frente la \textbf{maldición de la dimensionalidad}: con decenas de predictores censales, los ``vecinos'' de una mesa están lejísimos.
+  \item Su papel hoy: el \textbf{contraste natural} con la logística. Hiperplano vs.\ ninguna forma; cero perillas vs.\ una; extrapola vs.\ se queda plano.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Cuál usar? La comparación de ISL (sección 4.5)}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{llll}
+\hline
+Método & Frontera & Supuestos & Gana cuando\ldots \\
+\hline
+Logística & lineal & pocos & $n$ grande; frontera casi lineal \\
+LDA & lineal & normalidad, $\Sigma$ común & $n$ pequeño; clases separadas \\
+QDA & cuadrática & normalidad, $\Sigma_k$ & curvatura y $n$ suficiente \\
+Naive Bayes & no lineal & independencia por clase & $p$ enorme, $n$ escaso (texto) \\
+$k$-NN & cualquiera & ninguno & $p$ pequeño; frontera irregular \\
+Árboles (sesión 6) & cualquiera & ninguno & tabulares con interacciones \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\begin{itemize}\itemsep2pt
+  \item ISL lo muestra con seis escenarios simulados: \textbf{ningún método domina}; el ganador depende de la forma de la frontera verdadera y de cuántos datos hay para dibujarla. \pause
+  \item En datos reales la logística suele quedar cerca de los métodos flexibles: en Gelvez et al.\ (2026) el logit alcanza AUC de 0,83 a 0,91 y el bosque afinado le añade entre 0,01 y 0,04. \pause
+\end{itemize}
+\begin{block}{La regla del curso}
+La logística es el \emph{baseline} de clasificación, como OLS lo es de regresión. Las métricas que siguen se aplican igual a cualquier modelo que entregue una probabilidad.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 4: DE LA PROBABILIDAD A LA DECISIÓN
+%%#################################################
+%%#################################################
+\section{De la probabilidad a la decisión: las métricas que deciden}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{La exactitud engaña}
+\framesubtitle{Segunda vuelta de 2010: el ganador se llevó el 87,8\,\% de las mesas de prueba}
+\small
+Un modelo que no mira los datos y dice ``el presidente ganó en todas'' acierta en el 87,8\% de las mesas. El bosque afinado de Gelvez et al.\ (2026) acierta en el 92,2\%.
+\pause
+\vspace{0.15cm}
+\begin{block}{Pregunta para la sala}
+¿Cuánto mejor es el modelo que la regla trivial? ¿Y qué \emph{no} nos dice el 92,2\%?
+\end{block}
+\pause
+\textcolor{gray}{Baja el error del 12,2\% al 7,8\%, que no es poco. Pero esconde \emph{en qué} se equivoca: como veremos en la matriz, el modelo encuentra solo la \textbf{mitad} de las mesas que ganó la oposición. Con clases desbalanceadas, la exactitud premia ignorar a la clase minoritaria, que casi siempre es \emph{la que importa}: el moroso, el fraude, el hogar pobre, el desertor.}
+\pause
+\vspace{0.15cm}
+\begin{itemize}\itemsep4pt
+  \item El problema no es del modelo sino de la \textbf{métrica}: la exactitud pesa cada error igual y su valor depende de la \textbf{prevalencia} (la proporción de positivos), que el modelo no controla.
+  \item Necesitamos vocabulario para los \emph{tipos} de error, y después precios para cada uno.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La matriz de confusión, con números reales}
+\framesubtitle{Gelvez et al.\ (2026), Tabla A5: segunda vuelta de 2010, 1.951 mesas de prueba}
+\small
+\begin{columns}[T]
+\begin{column}{0.44\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.58]
+  \node[font=\scriptsize\bfseries] at (2.75,2.85) {Predicho $+$};
+  \node[font=\scriptsize\bfseries] at (6.05,2.85) {Predicho $-$};
+  \node[font=\scriptsize\bfseries, rotate=90] at (0.6,1.8) {Real $+$};
+  \node[font=\scriptsize\bfseries, rotate=90] at (0.6,0.6) {Real $-$};
+  \draw[fill=green!15] (1.1,1.2) rectangle (4.4,2.4); \node[font=\scriptsize] at (2.75,1.8) {\textbf{VP} $= 1.678$};
+  \draw[fill=red!15]   (4.4,1.2) rectangle (7.7,2.4); \node[font=\scriptsize] at (6.05,1.8) {\textbf{FN} $= 34$};
+  \draw[fill=orange!15] (1.1,0.0) rectangle (4.4,1.2); \node[font=\scriptsize] at (2.75,0.6) {\textbf{FP} $= 119$};
+  \draw[fill=green!8]  (4.4,0.0) rectangle (7.7,1.2); \node[font=\scriptsize] at (6.05,0.6) {\textbf{VN} $= 120$};
+\end{tikzpicture}
+\end{center}
+\vspace{0.05cm}
+\scriptsize
+$+$: el eventual presidente ganó la mesa (1.712 mesas, el 87,8\%). $-$: la ganó otro candidato (239 mesas).
+\end{column}
+\begin{column}{0.56\textwidth}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{llc}
+\hline
+Métrica & Fórmula & 2010-II \\
+\hline
+Exactitud & $(VP+VN)/n$ & 0,922 \\
+\emph{Recall} (sensibilidad), $R$ & $VP/(VP+FN)$ & 0,980 \\
+Especificidad & $VN/(VN+FP)$ & 0,502 \\
+Precisión, $P$ & $VP/(VP+FP)$ & 0,934 \\
+F1 & $2PR/(P+R)$ & 0,956 \\
+\emph{Balanced accuracy} & $(R + \text{espec.})/2$ & 0,741 \\
+\hline
+\end{tabular}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.15cm}
+\begin{itemize}\itemsep3pt
+  \item \textbf{Recall:} de las mesas que ganó el presidente, ¿qué fracción encontré? \textbf{Especificidad:} de las que ganó la oposición, ¿cuántas reconocí? Aquí, \textbf{la mitad}. \textbf{Precisión:} de mis ``positivos'', ¿cuántos eran ciertos?
+  \item Exactitud, precisión, \emph{recall} y F1 lucen espléndidos; la especificidad y la \emph{balanced accuracy} cuentan la otra mitad de la historia. Ninguna métrica sola lo hace.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Dos elecciones, dos prevalencias, las mismas métricas}
+\framesubtitle{Gelvez et al.\ (2026), Tabla A5: el mismo bosque, mesas de prueba de cada elección}
+\small
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{lcc}
+\hline
+ & 2010, 2.ª vuelta & 2022, 1.ª vuelta \\
+\hline
+Prevalencia de la clase positiva & 0,878 & 0,545 \\
+Exactitud & 0,922 & 0,861 \\
+F1 & 0,956 & 0,873 \\
+\emph{Balanced accuracy} & 0,741 & 0,859 \\
+AUC & 0,931 & 0,931 \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\begin{itemize}\itemsep4pt
+  \item Por exactitud y F1 el modelo de 2010 parece mucho mejor; por \emph{balanced accuracy} es peor, y por AUC son \textbf{idénticos}. Exactitud y F1 suben con la \textbf{dominancia} del ganador (88\% de las mesas en 2010), no solo con la habilidad del modelo; la \emph{balanced accuracy} y la AUC no dependen de la prevalencia. \pause
+  \item Por eso el paper usa la AUC como cabecera (``la prevalencia de la clase positiva varía marcadamente entre elecciones'') y manda el resto a un apéndice con las matrices completas. \pause
+  \item \textbf{Regla de reporte:} junto con la métrica cabecera, \textbf{siempre} la prevalencia y la matriz de confusión. Sin ellas, un 92\% no significa nada.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El umbral es una decisión económica}
+\framesubtitle{La estadística estima $p$; la economía pone los costos}
+\small
+El modelo entrega $\hat{p}(x)$; decidir exige un \textbf{umbral} $\tau$: predecir $+$ si $\hat{p}(x) \geq \tau$. ¿Quién fija $\tau$? \textbf{Los costos.} Sean $c_{FP}$ y $c_{FN}$ los costos de cada error y $p$ la probabilidad de un individuo.
+\pause
+\vspace{0.1cm}
+\textbf{1. Costo esperado de predecir $+$:} \quad $(1 - p)\, c_{FP}$ \hfill (me equivoco si era $-$)
+
+\textbf{2. Costo esperado de predecir $-$:} \quad $p\, c_{FN}$ \hfill (me equivoco si era $+$)
+\pause
+
+\textbf{3. Predecir $+$ cuando} $(1-p)\,c_{FP} \leq p\, c_{FN}$, es decir:
+\[ \boxed{ \; p \;\geq\; \tau^{*} \;=\; \frac{c_{FP}}{c_{FP} + c_{FN}} \; } \]
+\pause
+\begin{itemize}\itemsep4pt
+  \item Solo importa el \textbf{cociente} de costos. Errores igual de caros $\Rightarrow \tau^* = 0{,}5$ (la regla de Bayes). $FN$ diez veces más caro $\Rightarrow \tau^* = 1/11 \approx 0{,}09$: alarma temprana.
+  \item El $0{,}5$ por defecto de los paquetes es una decisión económica \emph{implícita}, y casi nunca la correcta. Cuando los errores no tienen costos asimétricos (medir la predictibilidad de una elección), $0{,}5$ es el umbral natural y la métrica cabecera debe ser una que \textbf{no dependa del umbral}.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Tres mini-casos para calibrar la intuición}
+\small
+\textbf{Focalizar una transferencia contra la pobreza extrema.} $c_{FN}$ (excluir a un hogar pobre) es alto; $c_{FP}$ (incluir a un no pobre) es una filtración fiscal, real pero menor $\Rightarrow$ $\tau^*$ \textbf{bajo}: ante la duda, incluir. La filtración se vigila con la \emph{precisión}.
+\pause
+\vspace{0.12cm}
+\textbf{Aprobar un crédito.} El ``positivo'' es el impago. $c_{FN}$ (prestarle a quien impaga) es la pérdida de capital; $c_{FP}$ (negarle a un buen pagador) es margen no ganado $\Rightarrow$ $\tau^*$ bajo también; los bancos lo afinan sobre la \textbf{ganancia esperada} de la cartera. Fuster et al.\ (2022) muestran que pasar del logit a modelos de ML mejora la predicción del impago hipotecario, pero el beneficio se reparte de forma desigual entre grupos raciales.
+\pause
+\vspace{0.12cm}
+\textbf{Libertad bajo fianza.} Kleinberg et al.\ (2018) predicen el riesgo de que un acusado no comparezca; el juez decide con un umbral implícito. Ordenando por riesgo predicho, una regla podría reducir el crimen hasta un 24,7\% con la misma tasa de detención, o la detención hasta un 41,9\% con el mismo crimen. El modelo \textbf{ordena}; la sociedad elige el punto de la curva.
+\pause
+\vspace{0.1cm}
+\begin{block}{El patrón general}
+Mismo modelo, distinta economía $\Rightarrow$ distinto umbral. Reportar ``exactitud'' sin discutir costos es esconder la decisión. Y elegir el punto exige ver \emph{todos} los umbrales a la vez: la curva ROC.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La curva ROC: todos los umbrales a la vez}
+\small
+\begin{columns}[T]
+\begin{column}{0.46\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.7]
+  \fill[blue!8] (0,0) -- (0.3,1.6) -- (0.6,2.4) -- (1.2,3.0) -- (2.0,3.4) -- (2.8,3.7) -- (4,4) -- (4,0) -- cycle;
+  \draw[->] (0,0) -- (4.6,0) node[below, font=\scriptsize] {tasa de FP};
+  \draw[->] (0,0) -- (0,4.5) node[above, font=\scriptsize] {tasa de VP (\emph{recall})};
+  \draw[dashed, gray] (0,0) -- (4,4);
+  \draw[blue, very thick] plot[smooth] coordinates {(0,0) (0.3,1.6) (0.6,2.4) (1.2,3.0) (2.0,3.4) (2.8,3.7) (4,4)};
+  \fill[black] (0.6,2.4) circle (2.6pt);
+  \node[font=\scriptsize] at (1.85,2.1) {$\tau$ alto};
+  \fill[black] (2.8,3.7) circle (2.6pt);
+  \node[font=\scriptsize] at (2.75,4.15) {$\tau$ bajo};
+  \node[font=\scriptsize, gray, rotate=45] at (1.5,1.2) {azar};
+  \node[font=\scriptsize, blue] at (3.2,1.2) {AUC $=$ área};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.54\textwidth}
+\vspace{0.05cm}
+Barriendo $\tau$ de 1 a 0 y graficando (tasa de FP, tasa de VP) en cada punto:
+\begin{itemize}\itemsep3pt
+  \item Cada punto es un umbral; la curva es el \textbf{menú completo} de intercambios entre encontrar positivos y dar falsas alarmas.
+  \item \textbf{AUC:} $0{,}5$ es el azar, $1$ es perfecto. Lectura exacta: \emph{la probabilidad de que un positivo al azar reciba mayor $\hat{p}$ que un negativo al azar}.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.1cm}
+\begin{itemize}\itemsep3pt
+  \item En Gelvez et al.\ (2026), AUC entre 0,86 y 0,93: si le dan una mesa que ganó el presidente y una que perdió, el modelo ordena bien el par en el 86 a 93\% de los casos. Compara modelos y elecciones \textbf{sin fijar umbral}.
+  \item \textbf{La pregunta de Kim \& Zilinsky:} su AUC sube despacio con las décadas (0,002 por año, $p < 0{,}01$) y la \emph{accuracy} al 50\% no se mueve. La AUC mira el orden en \emph{todos} los umbrales; la exactitud, solo cuántos cruzan el 0,5. Ordenar bien y decidir bien son pasos distintos.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cuando los positivos son raros: precisión--\emph{recall}}
+\small
+\begin{columns}[T]
+\begin{column}{0.42\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.62]
+  \draw[->] (0,0) -- (4.5,0) node[below, font=\scriptsize] {\emph{recall}};
+  \draw[->] (0,0) -- (0,4.4) node[above, font=\scriptsize] {precisión};
+  \draw[dashed, gray] (0,1.0) -- (4,1.0);
+  \node[font=\scriptsize, gray] at (2.0,0.6) {azar $=$ prevalencia};
+  \draw[blue, very thick] plot[smooth] coordinates {(0.15,3.9) (0.8,3.75) (1.6,3.4) (2.4,2.9) (3.0,2.4) (3.5,1.9) (4.0,1.25)};
+  \fill[black] (2.4,2.9) circle (2.6pt);
+  \node[font=\scriptsize] at (3.25,3.3) {F1 en $\tau = 0{,}5$};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.58\textwidth}
+\vspace{0.05cm}
+\begin{itemize}\itemsep4pt
+  \item Con 2\% de positivos, la ROC luce optimista: la tasa de FP divide por los negativos, que son \emph{muchísimos}; miles de falsas alarmas apenas la mueven.
+  \item La curva \textbf{PR} no usa los VN: muestra cruda la calidad de las alarmas. Su ``azar'' es la prevalencia, no $0{,}5$.
+  \item El F1 es \emph{un punto} de esta curva (el del umbral elegido); la PR es el menú completo.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.15cm}
+\begin{block}{Regla práctica (Saito \& Rehmsmeier, 2015)}
+Positivos raros (fraude, impago, deserción, pobreza extrema) $\Rightarrow$ reportar ROC \textbf{y} PR, y decir cuál es la prevalencia. Con clases razonablemente balanceadas, como las mesas de 2022, la ROC basta.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Calibración: ¿$\hat{p} = 0{,}8$ significa 80\,\%?}
+\framesubtitle{La pendiente de $y$ sobre $\hat{y}$ de la sesión 2, ahora para probabilidades}
+\small
+\begin{columns}[T]
+\begin{column}{0.42\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.5]
+  \draw[->] (0,0) -- (4.5,0) node[below, font=\scriptsize] {prob.\ predicha $\hat{p}$};
+  \draw[->] (0,0) -- (0,4.4);
+  \node[font=\scriptsize, rotate=90] at (-0.5,2.1) {frec.\ observada};
+  \draw[dashed, gray] (0,0) -- (4,4);
+  \draw[red, very thick] plot[smooth] coordinates {(0,0.45) (1,1.15) (2,2.0) (3,2.85) (4,3.55)};
+  \node[font=\scriptsize, gray] at (3.0,4.2) {perfecta};
+  \node[font=\scriptsize, red] at (3.3,2.3) {sobreconfianza};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.58\textwidth}
+\vspace{0.05cm}
+\begin{itemize}\itemsep3pt
+  \item Agrupen la prueba por deciles de $\hat{p}$ y comparen con la frecuencia observada de $y = 1$ en cada grupo. Sobre la diagonal, el modelo \textbf{dice la verdad}.
+  \item Descalibrado $\Rightarrow$ el umbral $\tau^*$ sobre $\hat{p}$ decide mal aunque la AUC sea alta: ordenar bien no es cuantificar bien.
+  \item La logística suele salir calibrada; $k$-NN con $k$ pequeño, bosques y \emph{boosting}, no siempre $\Rightarrow$ recalibrar (Platt o isotónica) en validación.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.1cm}
+\begin{itemize}\itemsep3pt
+  \item \textbf{Métricas de probabilidad:} la \textbf{log-loss} (lo que la logística minimiza) y el \textbf{Brier} $= \frac{1}{n_t}\sum_i (\hat{p}_i - y_i)^2$, el MSE de las probabilidades, que se descompone en calibración y resolución (apéndice).
+  \item Una figura barata: $\hat{p}$ por clase observada (Gelvez et al., Figs.\ 16--17 del apéndice): dos nubes separadas, con medias lejos de $0{,}5$.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Desbalance de clases: los remedios y sus advertencias}
+\small
+Con 2\% de impagos, la verosimilitud apenas nota a la clase minoritaria: el modelo optimiza ignorándola. \textbf{Los remedios}, del más simple al más elaborado:
+\begin{enumerate}\itemsep3pt
+  \item \textbf{Pesos en la pérdida} (\emph{class weights}): encarecer los errores en la clase rara. Sin tocar los datos; disponible en casi todo (\texttt{glm}, \texttt{ranger}, \texttt{xgboost}).
+  \item \textbf{Submuestrear} la clase mayoritaria (rápido, pero tira datos) o \textbf{sobremuestrear} la minoritaria (duplica; invita al sobreajuste sobre copias).
+  \item \textbf{SMOTE} (Chawla et al., 2002): crear positivos \emph{sintéticos} interpolando entre vecinos de la clase rara: $x_{new} = x_i + u\,(x_{nn} - x_i)$, $u \sim U(0,1)$.
+\end{enumerate}
+\pause
+\vspace{0.1cm}
+\begin{block}{Dos advertencias no negociables}
+(i) Todo remuestreo ocurre \textbf{solo en el entrenamiento}: remuestrear antes de partir contamina la prueba (la disciplina completa, en la sesión 4). (ii) Remuestrear \textbf{distorsiona $\hat{p}$}, que queda inflada: recalibrar antes de usar umbrales de costos.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Remuestrear\ldots\ o simplemente decidir mejor?}
+\small
+\textbf{La pregunta incómoda:} si el modelo \emph{ordena} bien (AUC decente) y está calibrado, ¿hacía falta remuestrear?
+\pause
+\begin{itemize}\itemsep3pt
+  \item Muchas veces \textbf{no}: mover $\tau^*$ según los costos logra lo mismo, con probabilidades honestas y sin cirugía sobre los datos.
+  \item Pesos y SMOTE ayudan cuando la clase rara es \emph{tan} rara que el modelo ni aprende su estructura.
+\end{itemize}
+\pause
+\textbf{El flujo del practicante:}
+\begin{enumerate}\itemsep2pt
+  \item Partición (y, desde la sesión 4, CV) \textbf{estratificadas}.
+  \item Entrenar normal; evaluar con ROC \textbf{y} PR, nunca con la exactitud sola.
+  \item Calibrar; decidir con $\tau^*$ de costos.
+  \item ¿Aún mal en \emph{recall} o precisión? Pesos de clase; SMOTE como último recurso.
+\end{enumerate}
+\pause
+\begin{block}{Para la aplicación}
+Las mesas de 2022 están balanceadas y sin costos asimétricos: el flujo se detiene en el paso 2. Con 2010 (88\% de positivos) la exactitud y el F1 se inflan solos.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 5: APLICACIÓN GUIADA
+%%#################################################
+%%#################################################
+\section{Aplicación guiada: ¿ganó el eventual presidente en la mesa?}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Los datos y la pregunta}
+\small
+\textbf{Datos:} el panel de mesas de Gelvez et al.\ (2026): 94.671 observaciones mesa--vuelta en nueve vueltas presidenciales (2006--2022). Predictores: características demográficas, socioeconómicas, de infraestructura y étnicas del vecindario censal de cada mesa, luminosidad nocturna e indicadores de departamento.
+\pause
+\vspace{0.05cm}
+\textbf{Pregunta predictiva:} ¿el candidato que terminó siendo presidente ganó la mesa? ($y = 1$ si el eventual ganador nacional fue el más votado.) Dos vueltas para contrastar: 2022-I (prevalencia 0,545: competencia pareja) y 2010-II (0,878: dominancia).
+\pause
+\vspace{0.05cm}
+\textbf{Decisiones antes de ajustar nada:}
+\begin{enumerate}\itemsep2pt
+  \item Partición 80/20 \textbf{estratificada por clase}; la prueba queda bajo llave.
+  \item Baseline: ``ganó en todas''. Referencia: logística con todos los predictores. Retador: $k$-NN estandarizado.
+  \item Umbral $0{,}5$ (sin costos asimétricos); cabecera: AUC y \emph{balanced accuracy}.
+\end{enumerate}
+\pause
+\textcolor{gray}{Lo que no haremos hoy: elegir $k$ con la prueba. Se elige con un pedazo del entrenamiento; la forma correcta (CV de 5 pliegues, como en el paper) llega en la sesión 4.}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cuatro modelos, una misma prueba: 2022, primera vuelta}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{llcccc}
+\hline
+ & Modelo & AUC & Exactitud & \emph{Bal.\ acc.} & F1 \\
+\hline
+0 & ``El presidente ganó en todas'' & 0,500 & 0,545 & 0,500 & 0,705 \\
+1 & Logística, todos los predictores & 0,909 & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+2 & $k$-NN, predictores estandarizados & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+3 & \emph{Random forest} afinado (sesión 6) & 0,931 & 0,861 & 0,859 & 0,873 \\
+\hline
+\end{tabular}
+\end{center}
+{\scriptsize\textcolor{gray}{Cifras publicadas: Gelvez et al.\ (2026), Tablas 1 y A5, misma partición 80/20. El baseline se deduce de la prevalencia (precisión $= 0{,}545$, \emph{recall} $= 1$). Las celdas en gris se calculan con el código de la sesión y pueden diferir por la semilla.}}
+\pause
+\vspace{0.1cm}
+\textbf{Preguntas que la tabla debe responder:}
+\begin{itemize}\itemsep3pt
+  \item ¿Cuánto añade una recta al baseline? De 0,5 a 0,91 de AUC: la geografía del ganador es legible incluso con una frontera lineal; es ``una propiedad de los datos, no un artefacto de la flexibilidad del modelo'' (Gelvez et al.). \pause
+  \item ¿Le gana $k$-NN al hiperplano? Con decenas de predictores, la maldición de la dimensionalidad juega en contra; si gana, la frontera tiene curvatura que la logística no ve. \pause
+  \item ¿Qué compra el bosque? Dos centésimas de AUC sobre el logit: el precio y el premio de la flexibilidad, que discutimos en la sesión 6.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Después de la tabla: las tres figuras}
+\small
+\begin{enumerate}\itemsep6pt
+  \item \textbf{Las curvas ROC de los modelos, en los mismos ejes.} Si la de $k$-NN cruza a la de la logística, un modelo gana en los umbrales exigentes y el otro en los generosos: la AUC resume, la curva decide. Marcar el punto $\tau = 0{,}5$ de cada uno. \pause
+  \item \textbf{Calibración:} la curva de confiabilidad por deciles de $\hat{p}$ para la logística y $k$-NN, y al lado $\hat{p}$ por clase observada. Esperamos a la logística sobre la diagonal y a $k$-NN con $k$ pequeño, sobreconfiado. \pause
+  \item \textbf{Dónde falla:} la tasa de error por departamento y por ruralidad, y el mapa de aciertos y fallos (Gelvez et al., Figs.\ 18--26 del apéndice). Manchas de fallos del mismo signo son lo que la validación espacial de la sesión 4 va a castigar.
+\end{enumerate}
+\pause
+\vspace{0.1cm}
+\begin{block}{El reporte de una clasificación, de aquí en adelante}
+Tabla con métrica cabecera $+$ prevalencia $+$ matriz de confusión; ROC (y PR si los positivos son raros); calibración; error por el subgrupo que le importa a la pregunta. Después, repetir con 2010 y ver cómo cambian exactitud y F1 sin que cambie la AUC.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}[fragile]{Cómo se ve en R (\texttt{tidymodels})}
+\scriptsize
+\begin{verbatim}
+library(tidymodels); set.seed(2026)
+mesas22 <- mesas |> filter(eleccion == 2022, vuelta == 1) |>
+  mutate(ganador = factor(ganador, levels = c("1", "0")))
+split <- initial_split(mesas22, prop = 0.8, strata = ganador)
+train <- training(split); test <- testing(split)   # bajo llave
+rec <- recipe(ganador ~ ., data = train) |>
+  step_impute_mean(all_numeric_predictors()) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_normalize(all_numeric_predictors())   # escala para k-NN
+m_log <- logistic_reg() |> set_engine("glm")
+m_knn <- nearest_neighbor(neighbors = 25) |>
+  set_engine("kknn") |> set_mode("classification")
+fit_log <- workflow(rec, m_log) |> fit(train)
+pred <- augment(fit_log, test)             # .pred_1 y .pred_class
+cls  <- metric_set(roc_auc, accuracy, bal_accuracy, f_meas)
+cls(pred, truth = ganador, estimate = .pred_class, .pred_1)
+\end{verbatim}
+\normalsize
+\small
+\begin{itemize}\itemsep2pt
+  \item \texttt{strata} conserva la prevalencia en las dos muestras; la imputación y la escala se aprenden en el entrenamiento y se aplican a la prueba. \texttt{accuracy}, \texttt{bal\_accuracy} y \texttt{f\_meas} usan el umbral $0{,}5$ de \texttt{.pred\_class}; \texttt{roc\_auc}, no. Curvas y calibración: \texttt{roc\_curve()} con \texttt{autoplot()} y \texttt{probably::cal\_plot\_breaks()}.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Presentación estudiantil: el paper de la sesión 2}
+\framesubtitle{Quince minutos, tres preguntas}
+\small
+Bogin \& Shui (2020) o Pace \& Hayunga (2020), a elección de quien presenta.
+\begin{enumerate}\itemsep6pt
+  \item \textbf{¿Qué se predice y por qué importa?} El precio (o el avalúo) de una vivienda; quién usa esa predicción y qué decisión depende de ella.
+  \item \textbf{¿Con qué datos y método, y cómo se evalúa?} Partición, modelos comparados (hedónico vs.\ flexibles), métricas en la prueba, resultados por cuartil de precio o por subgrupo.
+  \item \textbf{¿Qué se encuentra y cómo se interpreta?} Cuánto gana el modelo flexible, dónde (las colas), y qué dice eso de la especificación lineal.
+\end{enumerate}
+\pause
+\vspace{0.2cm}
+\begin{block}{Para el resto de la sala}
+Mientras escuchan, anoten: ¿contra qué baseline se mide la ganancia? ¿Se reporta el error donde importa (viviendas caras, zonas rurales)? Y una pregunta de hoy: si el problema fuera binario (¿el avalúo supera el precio de venta?), ¿qué métrica cabecera usarían y por qué?
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 6: INTERPRETACIÓN Y CIERRE
+%%#################################################
+%%#################################################
+\section{Interpretación y cierre}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Qué dice el modelo y qué no dice}
+\small
+\textbf{Lo que sí dice.} Con una AUC de 0,91 para una frontera lineal, la geografía del apoyo al ganador de 2022 es \emph{legible} desde las características de los lugares: mesas parecidas en composición demográfica, estrato, infraestructura y etnicidad votan parecido. Los $\hat{\beta}$ y las \emph{odds ratios} dicen \textbf{qué usa} el modelo para ordenar las mesas.
+\pause
+\vspace{0.1cm}
+\textbf{Lo que no dice.}
+\begin{itemize}\itemsep3pt
+  \item \textbf{No es causal:} que la composición étnica ``prediga'' el voto no significa que lo cause; puede ser un proxy de historia, geografía o presencia del Estado.
+  \item \textbf{No es individual:} las unidades son mesas; inferir que \emph{un} votante con tal característica vota de tal forma es inferencia ecológica.
+  \item \textbf{No es un pronóstico:} el desempeño fuera de muestra dentro de 2022 no anticipa 2026. Lo que se mide es la \emph{estructura} de una elección, no su futuro.
+\end{itemize}
+\pause
+\vspace{0.1cm}
+\begin{block}{La métrica es parte de la interpretación}
+Un F1 de 0,96 en 2010 habla de \emph{dominancia}: el ganador arrasó y la clase positiva era fácil. Una AUC de 0,93 con clases parejas en 2022 habla de \emph{sorting} territorial: coaliciones alineadas con divisiones sociales persistentes. Leer la métrica junto con la prevalencia es leer la elección.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cuándo usar qué, y qué leer}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lp{4.5cm}p{4.3cm}}
+\hline
+ & Usar cuando & Cuidado con \\
+\hline
+Logística & siempre, como baseline; $p$ grande con penalización & separación perfecta; curvaturas que no escribimos \\
+$k$-NN & $p$ pequeño y frontera irregular & la escala de las $x$; alta dimensión; $\hat{p}$ granular \\
+LDA / QDA / NB & $n$ pequeño; $p$ enorme (texto) & normalidad e independencia como supuestos fuertes \\
+Exactitud & clases balanceadas y costos simétricos & prevalencia desigual: reportar \emph{balanced accuracy} \\
+AUC / ROC & comparar modelos y contextos sin umbral & no elige el umbral; optimista con positivos muy raros \\
+Precisión--\emph{recall}, F1 & positivos raros; alarmas costosas & dependen del umbral y de la prevalencia \\
+Calibración & antes de cualquier umbral por costos & remuestreo y ensambles descalibran \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\vspace{0.1cm}
+\textbf{Qué leer:} ISL cap.\ 4 (los métodos) y su sección 4.4.2 (matriz de confusión y ROC con el ejemplo \emph{Default}); Fawcett (2006) para la ROC completa; Saito \& Rehmsmeier (2015) para la PR; el apéndice de Gelvez et al.\ (2026) como modelo de reporte.
+\end{frame}
+
+%%=================================================
+\begin{frame}{Recap}
+\small
+\begin{enumerate}\itemsep6pt
+  \item \textbf{Clasificar es estimar $P(y \mid x)$ y luego decidir.} El ideal es el clasificador de Bayes; su error es el $\sigma^2$ de la clasificación. La \textbf{logística} (índice lineal, verosimilitud, sin perillas) es el baseline; LDA/NB y $k$-NN son las alternativas, y los árboles llegan en la sesión 6.
+  \item \textbf{La exactitud engaña} cuando la prevalencia es desigual. La matriz de confusión da el vocabulario: \emph{recall}, especificidad, precisión, F1, \emph{balanced accuracy}. Siempre con la prevalencia al lado.
+  \item \textbf{El umbral es economía:} $\tau^* = c_{FP}/(c_{FP} + c_{FN})$. Sin costos asimétricos, $0{,}5$ y una métrica que no dependa del umbral.
+  \item \textbf{ROC y AUC} comparan modelos y contextos sin umbral; la \textbf{PR} es más honesta con positivos raros; nada funciona sin \textbf{calibración}.
+  \item \textbf{Desbalance:} estratificar, ordenar bien y calibrar antes que remuestrear; si se remuestrea, solo en el entrenamiento y recalibrando.
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}
+\vspace{2.0cm}
+\Large{Preparación para la próxima clase\ldots}
+\end{frame}
+
+%%#################################################
+%%#################################################
+%% PARTE 7: PRÓXIMA CLASE
+%%#################################################
+%%#################################################
+
+%%=================================================
+\begin{frame}{Para aprovechar al máximo la próxima sesión}
+\small
+\textbf{Lecturas obligatorias de esta semana:}
+\begin{itemize}\itemsep4pt
+  \item ISL, cap.\ 4 (secs.\ 4.1--4.5; la 4.6 es opcional). \\ \textcolor{gray}{Guía: la sección 4.4.2 tiene la matriz de confusión y la ROC con el ejemplo \emph{Default}; la 4.5 es la comparación que vimos en clase.}
+  \item Fawcett (2006), \emph{An Introduction to ROC Analysis}. \\ \textcolor{gray}{Guía: secciones 1--5 y 7; es \emph{el} manual de la curva ROC.}
+\end{itemize}
+\textbf{Para la presentación estudiantil de la sesión 4:} Kleinberg, Lakkaraju, Leskovec, Ludwig \& Mullainathan (2018), \emph{Human Decisions and Machine Predictions}, QJE, o Fuster, Goldsmith-Pinkham, Ramadorai \& Walther (2022), \emph{Predictably Unequal?}, JF.
+\pause
+\vspace{0.15cm}
+\textbf{Próxima sesión --- remuestreo y validación:} cómo estimar el error de generalización sin engañarse: conjunto de validación, LOOCV y $k$-fold; CV para elegir hiperparámetros (el $k$ de hoy, los nodos de la sesión 2); \emph{leakage} y el preprocesamiento dentro del \emph{pipeline}; CV temporal y espacial con las mesas; \emph{bootstrap} para ponerle intervalos a las métricas. Lectura previa: ISL cap.\ 5.
+\pause
+\vspace{0.15cm}
+\textbf{Aplicación de esta semana en R:} mesas de 2022 (primera vuelta) y 2010 (segunda vuelta) con \texttt{tidymodels}: baseline, logística y $k$-NN; la tabla y las tres figuras.
+\end{frame}
+
+%%=================================================
+%% Referencias
+\begin{frame}{Referencias esenciales}
+\scriptsize
+\begin{itemize}\itemsep2pt
+  \item James, G., Witten, D., Hastie, T., \& Tibshirani, R. (2021). \emph{An Introduction to Statistical Learning} (2.\ ed.). Springer. Cap.\ 4. [ISL]
+  \item Fawcett, T. (2006). An Introduction to ROC Analysis. \emph{Pattern Recognition Letters}, 27(8), 861--874.
+  \item Saito, T., \& Rehmsmeier, M. (2015). The Precision-Recall Plot Is More Informative than the ROC Plot on Imbalanced Datasets. \emph{PLOS ONE}, 10(3), e0118432.
+  \item Chawla, N., Bowyer, K., Hall, L., \& Kegelmeyer, W. (2002). SMOTE: Synthetic Minority Over-sampling Technique. \emph{JAIR}, 16, 321--357.
+  \item Gelvez, J.\ D., Cardiles, A., Martínez-González, E.\ F., \& Muñoz, M. (2026). How Predictable Is an Election? A Machine-Learning Approach to Electoral Behavior in Colombia. Documento de trabajo.
+  \item Kim, S.-y.\ S., \& Zilinsky, J. (2024). Division Does Not Imply Predictability. \emph{Political Behavior}, 46, 67--87.
+  \item Kleinberg, J., Lakkaraju, H., Leskovec, J., Ludwig, J., \& Mullainathan, S. (2018). Human Decisions and Machine Predictions. \emph{Quarterly Journal of Economics}, 133(1), 237--293.
+  \item Fuster, A., Goldsmith-Pinkham, P., Ramadorai, T., \& Walther, A. (2022). Predictably Unequal? The Effects of Machine Learning on Credit Markets. \emph{Journal of Finance}, 77(1), 5--47.
+  \item Kuhn, M., \& Silge, J. (2022). \emph{Tidy Modeling with R}. O'Reilly. \href{https://www.tmwr.org}{[disponible online]}
+\end{itemize}
+\normalsize
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% APÉNDICE: PARA PROFUNDIZAR
+%%#################################################
+%%#################################################
+\appendix
+\section{Apéndice: para profundizar}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{A1. La verosimilitud de la logística: gradiente y Newton--Raphson}
+\small
+\textbf{1. La log-verosimilitud} de $n$ observaciones independientes, usando $1 - p_i = 1/(1 + e^{x_i'\beta})$:
+\[ \ell(\beta) \;=\; \sum_{i=1}^{n} \Big[ y_i \log p_i + (1 - y_i)\log(1 - p_i) \Big] \;=\; \sum_{i=1}^{n} \Big[ y_i\, x_i'\beta - \log\big(1 + e^{x_i'\beta}\big) \Big]. \]
+\pause
+\textbf{2. Gradiente y hessiano} (con $\partial \log(1 + e^{x_i'\beta}) / \partial \beta = x_i\, p_i$):
+\[ \frac{\partial \ell}{\partial \beta} \;=\; \sum_{i=1}^{n} x_i \big( y_i - p_i \big), \qquad \frac{\partial^2 \ell}{\partial \beta\, \partial \beta'} \;=\; -\sum_{i=1}^{n} p_i (1 - p_i)\, x_i x_i' \;\equiv\; -\mathbf{X}'\mathbf{W}\mathbf{X}. \]
+\pause
+\textbf{3. Igualar a cero no tiene solución cerrada} ($p_i$ depende de $\beta$ de forma no lineal). Newton--Raphson itera
+\[ \beta^{(t+1)} \;=\; \beta^{(t)} + (\mathbf{X}'\mathbf{W}\mathbf{X})^{-1}\mathbf{X}'(\mathbf{y} - \mathbf{p}), \]
+una regresión ponderada en cada paso (\emph{IRLS}); \texttt{glm()} converge en pocas iteraciones.
+\pause
+\textbf{4. Lectura:} con intercepto, las condiciones de primer orden implican $\sum_i \hat{p}_i = \sum_i y_i$: la logística está calibrada \emph{en promedio}. Y el ``residuo por regresor'' $x_i(y_i - p_i)$ es lo que el \emph{boosting} logístico ajusta con árboles (sesión 6).
+\end{frame}
+
+%%=================================================
+\begin{frame}{A2. LDA, QDA y Naive Bayes: las fórmulas}
+\small
+\textbf{1. Bayes:} $P(y = k \mid x) = \dfrac{\pi_k f_k(x)}{\sum_l \pi_l f_l(x)}$; se clasifica en la clase que maximiza $\pi_k f_k(x)$.
+\pause
+\vspace{0.05cm}
+\textbf{2. LDA:} $f_k = N(\mu_k, \Sigma)$ con $\Sigma$ común. Tomando logaritmos y descartando lo que no depende de $k$:
+\[ \delta_k(x) \;=\; x'\Sigma^{-1}\mu_k \;-\; \tfrac{1}{2}\mu_k'\Sigma^{-1}\mu_k \;+\; \log \pi_k, \]
+\textbf{lineal en $x$}: la frontera entre dos clases, $\delta_k(x) = \delta_l(x)$, es un hiperplano. Se estima con $\hat{\pi}_k = n_k/n$, las medias por clase $\hat{\mu}_k$ y la covarianza agrupada $\hat{\Sigma}$.
+\pause
+\vspace{0.05cm}
+\textbf{3. QDA:} $f_k = N(\mu_k, \Sigma_k)$; sobrevive el término cuadrático $-\tfrac{1}{2}(x - \mu_k)'\Sigma_k^{-1}(x - \mu_k) - \tfrac{1}{2}\log|\Sigma_k|$. Con $p$ predictores hay que estimar $K\,p(p+1)/2$ parámetros de covarianza: mucha varianza si $n$ es pequeño. Es la curva U entre LDA y QDA.
+\pause
+\vspace{0.05cm}
+\textbf{4. Naive Bayes:} $f_k(x) = \prod_{j=1}^{p} f_{kj}(x_j)$; cada $f_{kj}$ se estima por separado (normal, histograma o, para $x_j$ discreta, frecuencias). Con miles de palabras como predictores y pocos correos, es el único de los tres que se puede estimar.
+\end{frame}
+
+%%=================================================
+\begin{frame}{A3. Máquinas de soporte vectorial: la intuición del margen}
+\framesubtitle{Fuera del cuerpo del curso; conservada para quien la necesite (ISL, cap.\ 9)}
+\small
+\begin{columns}[T]
+\begin{column}{0.38\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.42]
+  \draw[thick] (-0.3,0.42) -- (5.3,3.78);
+  \draw[dashed] (-0.3,1.32) -- (5.3,4.68);
+  \draw[dashed] (-0.3,-0.48) -- (5.3,2.88);
+  \foreach \px/\py in {0.7/2.9, 1.4/3.6, 2.2/4.1, 0.4/3.6, 2.6/4.6} \fill[blue] (\px,\py) circle (3pt);
+  \fill[blue] (1.0,2.1) circle (3pt); \draw[blue, thick] (1.0,2.1) circle (6pt);
+  \fill[blue] (2.5,3.0) circle (3pt); \draw[blue, thick] (2.5,3.0) circle (6pt);
+  \foreach \px/\py in {2.9/0.6, 3.6/1.0, 4.5/1.5, 3.2/0.2, 4.8/0.7} \fill[red] (\px,\py) circle (3pt);
+  \fill[red] (2.4,1.14) circle (3pt); \draw[red, thick] (2.4,1.14) circle (6pt);
+  \fill[red] (3.8,1.98) circle (3pt); \draw[red, thick] (3.8,1.98) circle (6pt);
+  \node[font=\scriptsize, rotate=31] at (4.6,3.95) {margen};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.62\textwidth}
+\vspace{0.05cm}
+\begin{itemize}\itemsep3pt
+  \item Otra filosofía: buscar el hiperplano que separa las clases con el \textbf{margen más ancho}; solo los puntos sobre el margen (los \emph{vectores de soporte}, circulados) determinan la solución.
+  \item \textbf{Soft margin} ($C$): permitir violaciones pagando un costo; es la perilla de regularización, elegida por CV.
+  \item \textbf{Kernel trick:} productos internos $\to K(x, x')$: fronteras no lineales sin construir el espacio.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.1cm}
+\begin{block}{Por qué no está en el cuerpo}
+Entrega \emph{scores}, no probabilidades (hay que calibrar con Platt); escala mal con $n$ grande; y en la literatura aplicada en economía casi no aparece frente a la logística penalizada y los ensambles de árboles. Referencia: Cortes \& Vapnik (1995), \emph{Machine Learning}, 20(3), 273--297.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A4. La AUC como probabilidad y la descomposición del Brier}
+\small
+\textbf{1. AUC $=$ probabilidad de ordenar bien un par.} Con $n_+$ positivos y $n_-$ negativos, el estadístico de Mann--Whitney
+\[ \widehat{\text{AUC}} \;=\; \frac{1}{n_+ n_-} \sum_{i \in +}\;\sum_{j \in -} \Big[ \1\{\hat{p}_i > \hat{p}_j\} + \tfrac{1}{2}\,\1\{\hat{p}_i = \hat{p}_j\} \Big] \]
+coincide con el área bajo la ROC empírica; por eso no depende del umbral ni de la prevalencia.
+\pause
+\textbf{2. El Brier se descompone} (Murphy, 1973). Con $B$ grupos por $\hat{p}$, de tamaño $n_b$, predicción media $\bar{p}_b$ y frecuencia observada $\bar{y}_b$:
+\[ \underbrace{\tfrac{1}{n}\textstyle\sum_i (\hat{p}_i - y_i)^2}_{\text{Brier}} \;\approx\; \underbrace{\tfrac{1}{n}\textstyle\sum_b n_b (\bar{p}_b - \bar{y}_b)^2}_{\text{calibración (menor, mejor)}} \;-\; \underbrace{\tfrac{1}{n}\textstyle\sum_b n_b (\bar{y}_b - \bar{y})^2}_{\text{resolución (mayor, mejor)}} \;+\; \underbrace{\bar{y}(1 - \bar{y})}_{\text{incertidumbre}}. \]
+\pause
+\begin{itemize}\itemsep2pt
+  \item \textbf{Calibración:} distancia a la diagonal de la curva de confiabilidad. \textbf{Resolución:} cuánto separan las probabilidades a los grupos (lo que la AUC mide de otra forma). \textbf{Incertidumbre:} el Brier del predictor constante $\bar{y}$.
+  \item AUC alta y Brier malo es posible: buena resolución, mala calibración ($k$-NN con $k$ pequeño; cualquier modelo tras remuestrear).
+\end{itemize}
+\end{frame}
+
+%%=================================================
+%% End document
+\end{document}

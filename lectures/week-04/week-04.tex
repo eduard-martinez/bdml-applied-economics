@@ -1,0 +1,860 @@
+\documentclass{beamer}
+
+%% Tema y configuraciones
+\usetheme{Boadilla}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=.,      % color de enlaces internos (índices, refs)
+    urlcolor=blue,    % color de URLs
+    citecolor=.,      % color de referencias bibliográficas
+}
+
+%% Helpers (macros y notación)
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\1}{\mathbb{I}}
+\newcommand{\MSE}{\mathrm{MSE}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+%% Encabezado
+\title[BDML]{Big Data y Machine Learning \\ para Economía Aplicada}
+\subtitle{Week 04: Remuestreo, validación y el \emph{pipeline} honesto}
+\author{Eduard F. Martinez Gonzalez, Ph.D.}
+\institute[]{Departamento de Economía, Universidad Icesi}
+\date{\today}
+
+%%=================================================
+%% Begin document
+\begin{document}
+
+%%=================================================
+%% Primer slide
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%=================================================
+\begin{frame}{Previously\ldots}
+\small
+\begin{itemize}\itemsep5pt
+  \item \textbf{Clasificar es estimar $P(y \mid x)$ y luego decidir.} La logística es el baseline; $k$-NN, LDA y Naive Bayes son las alternativas. \pause
+  \item \textbf{La exactitud engaña} con prevalencia desigual: matriz de confusión, \emph{balanced accuracy}, AUC como cabecera; el umbral es una decisión con costos; nada funciona sin calibración. \pause
+  \item \textbf{Reglas de oro:} \#1 el error de entrenamiento es optimista; \#2 la prueba se usa al final y una sola vez. \pause
+  \item Dos veces dijimos ``el $k$ se elige con un pedazo del entrenamiento; la forma correcta llega en la sesión 4''. Llegó.
+\end{itemize}
+\pause
+\vspace{0.1cm}
+\begin{block}{Hoy}
+Cómo estimar el error de generalización \textbf{sin gastar la prueba}: validación cruzada y \emph{bootstrap}. Con eso se eligen los hiperparámetros, se ponen intervalos a las métricas y se comparan modelos. Y la disciplina que hace todo eso honesto: el \textbf{\emph{pipeline}}, que se reutiliza de aquí al final del curso.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 1: ESTIMAR EL ERROR SIN GASTAR LA PRUEBA
+%%#################################################
+%%#################################################
+\section{Estimar el error sin gastar la prueba}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Dos preguntas, un solo conjunto de prueba}
+\small
+Necesitamos el error fuera de muestra para dos cosas distintas:
+\begin{enumerate}\itemsep4pt
+  \item \textbf{Elegir:} ¿qué $k$ en $k$-NN? ¿cuántos nodos en el \emph{spline}? ¿qué $\lambda$ (sesión 5)? ¿qué profundidad (sesión 6)? Muchas comparaciones.
+  \item \textbf{Reportar:} cuánto se equivoca el modelo final en datos nuevos. Una sola cifra.
+\end{enumerate}
+\pause
+\vspace{0.1cm}
+\begin{center}
+\begin{tikzpicture}[node distance=0.35cm, every node/.style={font=\scriptsize, align=center}]
+  \node (d) [draw, rounded corners, fill=gray!12, minimum height=0.85cm, text width=1.1cm] {datos};
+  \node (t) [draw, rounded corners, fill=blue!10, minimum height=0.85cm, text width=3.3cm, right=of d] {\textbf{entrenamiento}\\ remuestreo interno: elegir modelo e hiperparámetros};
+  \node (r) [draw, rounded corners, fill=blue!18, minimum height=0.85cm, text width=2.2cm, right=of t] {reajustar el ganador con todo el entrenamiento};
+  \node (p) [draw, rounded corners, fill=red!12, minimum height=0.85cm, text width=1.9cm, right=of r] {\textbf{prueba}: evaluar \textbf{una} vez};
+  \draw[-{Stealth}, thick] (d) -- (t); \draw[-{Stealth}, thick] (t) -- (r); \draw[-{Stealth}, thick] (r) -- (p);
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item La prueba solo puede responder la pregunta 2, y una sola vez (regla \#2). Si la usáramos para elegir entre veinte configuraciones, dejaría de ser prueba: sería un segundo entrenamiento.
+  \item La pregunta 1 se responde \textbf{dentro del entrenamiento}, remuestreándolo. De eso trata la primera mitad de hoy.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El punto de partida: el conjunto de validación}
+\small
+La receta de las sesiones 2 y 3: apartar una fracción del entrenamiento y evaluar ahí.
+\vspace{0.1cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.9]
+  \draw[fill=blue!12] (0,0) rectangle (6.0,0.7); \node[font=\small] at (3.0,0.35) {entrenamiento};
+  \draw[fill=orange!25] (6.0,0) rectangle (8.6,0.7); \node[font=\small] at (7.3,0.35) {validación};
+  \draw[fill=red!12] (8.9,0) rectangle (10.6,0.7); \node[font=\small] at (9.75,0.35) {prueba};
+\end{tikzpicture}
+\end{center}
+\pause
+\textbf{Funciona, pero tiene dos defectos} (ISL, Fig.~5.2):
+\begin{enumerate}\itemsep4pt
+  \item \textbf{Alta variabilidad:} el error estimado depende de \emph{cuáles} observaciones cayeron en validación. Con otra partición aleatoria, otra curva y a veces otro ganador.
+  \item \textbf{Desperdicia datos:} el modelo se entrena con una parte de la muestra; con menos datos aprende peor $\Rightarrow$ tiende a \textbf{sobreestimar} el error del modelo entrenado con todo.
+\end{enumerate}
+\pause
+\vspace{0.1cm}
+\begin{block}{La idea de la validación cruzada}
+Reutilizar \textbf{todos} los datos del entrenamiento: que cada observación sea validación \emph{alguna vez} y entrenamiento \emph{el resto} de las veces.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{\emph{Leave-one-out}: el extremo}
+\small
+Dejar \textbf{una sola} observación afuera, entrenar con las otras $n-1$, predecirla; repetir para cada $i$:
+\[ \mathrm{CV}_{(n)} \;=\; \frac{1}{n} \sum_{i=1}^{n} \big( y_i - \hat{y}_{(-i)} \big)^2, \qquad \hat{y}_{(-i)}: \text{ predicción de } i \text{ sin usar } i. \]
+\pause
+\begin{itemize}\itemsep4pt
+  \item \textbf{A favor:} cada modelo usa $n-1$ datos, así que casi no hay sesgo; y no hay azar: siempre da el mismo número.
+  \item \textbf{En contra:} $n$ ajustes (para OLS hay un atajo, en el apéndice; para bosques y redes, no). Y \textbf{varianza alta}: los $n$ modelos comparten $n-2$ observaciones, son casi idénticos, y promediar errores muy correlacionados reduce poco la varianza. \pause
+\end{itemize}
+\vspace{0.1cm}
+\begin{block}{La lección del promedio correlacionado}
+Promediar $n$ cosas solo ayuda si son \emph{distintas} entre sí. Vuelve en la sesión 6 con los bosques aleatorios.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{$k$-\emph{fold}: el estándar}
+\small
+Partir el entrenamiento en $k$ bloques de tamaño similar; cada bloque es validación una vez:
+\begin{center}
+\begin{tikzpicture}[scale=0.62]
+\foreach \row in {0,1,2,3,4} {
+  \node[font=\scriptsize] at (-1.2,-0.75*\row+0.3) {iter.\ \the\numexpr\row+1\relax};
+  \foreach \col in {0,1,2,3,4} {
+    \ifnum\col=\row
+      \draw[fill=orange!25] (1.35*\col,-0.75*\row) rectangle (1.35*\col+1.25,-0.75*\row+0.6);
+    \else
+      \draw[fill=blue!10] (1.35*\col,-0.75*\row) rectangle (1.35*\col+1.25,-0.75*\row+0.6);
+    \fi
+  }
+  \node[font=\scriptsize] at (7.7,-0.75*\row+0.3) {$\rightarrow$ error$_{\the\numexpr\row+1\relax}$};
+}
+\end{tikzpicture}
+\end{center}
+\pause
+\[ \mathrm{CV}_{(k)} \;=\; \frac{1}{k}\sum_{j=1}^{k} \text{error}_j, \qquad \widehat{\mathrm{EE}} \;=\; \frac{\text{desv.\ est.}(\text{error}_1, \ldots, \text{error}_k)}{\sqrt{k}} \]
+\begin{itemize}\itemsep3pt
+  \item Cada modelo entrena con la fracción $(k-1)/k$ de los datos; se ajusta $k$ veces. \textbf{Estándar:} $k = 5$ o $10$.
+  \item Los $k$ errores dan, además del promedio, una \textbf{medida de incertidumbre}. Es lo que las barras de la curva de CV van a mostrar.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Qué $k$? El sesgo--varianza del propio CV}
+\small
+El estimador CV es, él mismo, una variable aleatoria: tiene sesgo y varianza.
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lccc}
+\hline
+ & Sesgo & Varianza & Costo \\
+\hline
+Conjunto de validación & alto (pesimista) & alta & 1 ajuste \\
+LOOCV & $\approx 0$ & alta & $n$ ajustes \\
+$k$-fold ($k = 5, 10$) & bajo & moderada & $k$ ajustes \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Sesgo:} entrenar con menos de $n$ datos hace ver los modelos peores de lo que serán: el CV es algo \emph{pesimista}, más con $k$ pequeño.
+  \item \textbf{Varianza:} LOOCV promedia errores de modelos casi clones; $k$-fold usa modelos más distintos entre sí. \textbf{Veredicto:} $k = 10$ por defecto, $k = 5$ si el ajuste es costoso; repetir el CV con varias particiones si $n$ es pequeño. \pause
+\end{itemize}
+\begin{block}{En clasificación}
+Pliegues \textbf{estratificados}: cada uno conserva la prevalencia (con 2\% de positivos, un pliegue sin positivos no mide nada). La métrica se calcula \textbf{por pliegue} y luego se promedia: una AUC por pliegue, no una AUC sobre las predicciones concatenadas.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 2: CV PARA ELEGIR HIPERPARÁMETROS
+%%#################################################
+%%#################################################
+\section{Validación cruzada para elegir hiperparámetros}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{La curva de CV: girar la perilla y mirar}
+\small
+Para cada valor del hiperparámetro (aquí $\lambda$; puede ser $k$, los nodos, la profundidad), calcular $\mathrm{CV}$ y su error estándar:
+\begin{center}
+\begin{tikzpicture}[scale=0.6]
+  \draw[->] (0,0) -- (8.0,0) node[below, font=\scriptsize] {$\lambda$ (más penalización $\rightarrow$ más simple)};
+  \draw[->] (0,0) -- (0,4.0) node[above, font=\scriptsize] {$\mathrm{CV}(\lambda)$};
+  \foreach \x/\y in {0.6/3.0, 1.4/2.35, 2.2/1.95, 2.9/1.8, 3.6/1.85, 4.3/2.0, 5.0/2.25, 5.8/2.6, 6.6/3.05, 7.4/3.5} {
+    \draw[gray] (\x,\y-0.32) -- (\x,\y+0.32);
+    \fill[red] (\x,\y) circle (2.3pt);
+  }
+  \draw[dashed, gray, thick] (2.9,0) -- (2.9,3.6);
+  \node[font=\scriptsize] at (2.9,3.85) {$\lambda_{\min}$};
+  \draw[dashed, blue, thick] (4.3,0) -- (4.3,3.6);
+  \node[font=\scriptsize, blue] at (4.5,3.85) {$\lambda_{1SE}$};
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item $\lambda_{\min}$: el mínimo de la curva. Es la curva U de la sesión 1, ahora \textbf{estimada} con datos.
+  \item \textbf{Regla de una desviación estándar (1-SE):} el modelo \textbf{más simple} cuyo CV está a menos de un error estándar del mínimo. El propio CV es ruidoso: ante un empate estadístico, parsimonia. Con $k$-NN, ``más simple'' es $k$ más grande.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cómo recorrer el espacio de hiperparámetros}
+\small
+\begin{columns}[T]
+\begin{column}{0.44\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.4]
+\begin{scope}
+  \draw (0,0) rectangle (4,4);
+  \foreach \x in {0.7,2,3.3} \foreach \y in {0.7,2,3.3} \fill[blue] (\x,\y) circle (3pt);
+  \node[font=\scriptsize] at (2,-0.6) {grilla $3 \times 3$};
+\end{scope}
+\begin{scope}[shift={(5.6,0)}]
+  \draw (0,0) rectangle (4,4);
+  \foreach \x/\y in {0.4/1.1, 1.2/3.5, 1.9/0.6, 2.4/2.7, 3.1/1.8, 0.9/2.3, 3.6/3.2, 2.8/0.3, 1.5/1.6} \fill[red] (\x,\y) circle (3pt);
+  \node[font=\scriptsize] at (2,-0.6) {aleatoria, 9 puntos};
+\end{scope}
+\node[font=\scriptsize, rotate=90] at (-0.6,2) {hiperparámetro 2};
+\node[font=\scriptsize] at (4.8,-1.4) {hiperparámetro 1};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.56\textwidth}
+\vspace{0.05cm}
+\begin{itemize}\itemsep3pt
+  \item \textbf{Grilla:} 3 hiperparámetros $\times$ 10 valores $=$ 1.000 configuraciones, cada una con $k$ ajustes. No escala.
+  \item \textbf{Aleatoria} (Bergstra \& Bengio, 2012): con el mismo presupuesto explora \textbf{más valores} de cada hiperparámetro; gana cuando solo uno o dos importan.
+  \item \textbf{Bayesiana} (Snoek et al., 2012): modela el CV como función de los hiperparámetros y prueba donde es más probable mejorar (apéndice).
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.1cm}
+\begin{block}{Cómo se ve en un paper: Gelvez et al.\ (2026)}
+Bosque afinado con CV de 5 pliegues y búsqueda bayesiana de 100 configuraciones sobre cinco hiperparámetros; se elige la de mejor F1 medio de CV y se reajusta con todo el entrenamiento.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El CV anidado: cuando el número que reportas también se eligió}
+\small
+\begin{columns}[T]
+\begin{column}{0.5\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.55]
+  \node[font=\scriptsize, anchor=east] at (-0.2,0.3) {externo};
+  \foreach \i in {0,...,4} { \ifnum\i=4 \draw[fill=orange!30] (\i*1.3,0) rectangle (\i*1.3+1.2,0.6); \else \draw[fill=blue!10] (\i*1.3,0) rectangle (\i*1.3+1.2,0.6); \fi }
+  \draw[-{Stealth}] (2.5,-0.15) -- (2.5,-0.75);
+  \node[font=\scriptsize, anchor=east] at (-0.2,-1.15) {interno};
+  \foreach \i in {0,...,3} { \ifnum\i=1 \draw[fill=orange!12] (\i*1.3,-1.45) rectangle (\i*1.3+1.2,-0.85); \else \draw[fill=blue!10] (\i*1.3,-1.45) rectangle (\i*1.3+1.2,-0.85); \fi }
+  \node[font=\scriptsize, orange!80!black] at (5.85,0.3) {evaluar};
+  \node[font=\scriptsize, orange!80!black] at (5.85,-1.15) {afinar};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.5\textwidth}
+\vspace{0.05cm}
+\begin{itemize}\itemsep3pt
+  \item Si probamos 100 configuraciones y reportamos el mejor CV, ese número es \textbf{optimista}: es el máximo de 100 variables ruidosas (la maldición del ganador).
+  \item \textbf{CV anidado:} un lazo externo evalúa; dentro de cada pliegue de entrenamiento, un lazo interno afina. Lo que se reporta nunca se usó para elegir.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\begin{itemize}\itemsep3pt
+  \item En este curso usamos la versión sencilla del mismo principio: \textbf{afinar con CV dentro del entrenamiento, reportar en la prueba}. La prueba es el lazo externo con un solo pliegue.
+  \item El CV anidado hace falta cuando \textbf{no hay} prueba aparte (muestras pequeñas) o cuando se quiere el error del \emph{procedimiento} completo, con su afinación incluida.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 3: EL PIPELINE HONESTO
+%%#################################################
+%%#################################################
+\section{El \emph{pipeline} honesto: preprocesar dentro de cada pliegue}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{La trampa del \emph{leakage}: el CV mal hecho}
+\framesubtitle{La forma incorrecta y la correcta de hacer CV (ESL, sección 7.10.2)}
+\small
+\textbf{Escenario:} $n = 50$, $p = 5.000$ predictores, y una $y$ generada \textbf{al azar}: ninguna relación real.
+\vspace{0.1cm}
+\textbf{Procedimiento (¿ven el error?):}
+\begin{enumerate}\itemsep3pt
+  \item Con \textbf{todos} los datos, filtrar los 100 predictores más correlacionados con $y$.
+  \item Con esos 100, ajustar un clasificador y estimar su error por CV de 5 pliegues.
+\end{enumerate}
+\pause
+\textcolor{gray}{\textbf{Resultado:} el CV reporta un error cercano al 3\%, en datos donde el error verdadero es del 50\%. El paso 1 ya ``vio'' las respuestas de todos los pliegues: los predictores se eligieron usando también las observaciones que luego fingimos no conocer.}
+\pause
+\vspace{0.1cm}
+\textbf{La regla:} todo paso que use $y$, o que aprenda algo de los datos (selección de variables, imputación, estandarización, remuestreo por desbalance, PCA), ocurre \textbf{dentro} de cada pliegue, solo con sus datos de entrenamiento.
+\pause
+\begin{block}{Regla de oro \#3}
+El CV no valida modelos: valida \textbf{\emph{pipelines} completos}.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Anatomía de un \emph{pipeline}}
+\small
+\begin{center}
+\begin{tikzpicture}[node distance=0.28cm, every node/.style={font=\scriptsize, align=center}]
+  \node (a) [draw, rounded corners, fill=blue!10, minimum height=1.0cm, text width=1.45cm] {pliegue de\\ entrena\-miento};
+  \node (b) [draw, rounded corners, fill=blue!18, minimum height=1.0cm, text width=2.0cm, right=of a] {\textbf{aprender la receta}: medias, escalas, \emph{dummies}, selección};
+  \node (c) [draw, rounded corners, fill=blue!18, minimum height=1.0cm, text width=1.3cm, right=of b] {ajustar el modelo};
+  \node (d) [draw, rounded corners, fill=orange!20, minimum height=1.0cm, text width=1.9cm, right=of c] {\textbf{aplicar} la receta al pliegue de validación};
+  \node (e) [draw, rounded corners, fill=orange!30, minimum height=1.0cm, text width=1.15cm, right=of d] {predecir y medir};
+  \draw[-{Stealth}, thick] (a) -- (b); \draw[-{Stealth}, thick] (b) -- (c); \draw[-{Stealth}, thick] (c) -- (d); \draw[-{Stealth}, thick] (d) -- (e);
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item La \textbf{receta} es todo lo que transforma las $x$ antes del modelo. Se \emph{aprende} (las medias para imputar, las desviaciones para escalar, los cuantiles de los nodos) en el entrenamiento del pliegue y se \emph{aplica} tal cual a la validación. Es lo que hace \texttt{recipes}. \pause
+  \item Lo mismo vale para el conjunto de prueba al final: la receta aprendida con todo el entrenamiento se aplica a la prueba. Nunca al revés. \pause
+  \item Gelvez et al.\ (2026) lo dicen explícitamente: los faltantes se imputan con medias del entrenamiento ``dentro del \emph{pipeline}, de modo que ninguna información de validación entra en la selección del modelo''.
+\end{itemize}
+\pause
+\begin{block}{Lo que cambia de aquí al final del curso}
+Solo la caja ``ajustar el modelo'': hoy $k$-NN y logística; luego \texttt{glmnet}, bosques, \emph{boosting}, redes. La receta y el remuestreo son los mismos.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Otras formas de filtración}
+\small
+Cuatro filtraciones menos visibles que la de ESL, frecuentes en datos económicos:
+\begin{enumerate}\itemsep3pt
+  \item \textbf{Variables que contienen a $y$:} los votos del ganador al predecir si ganó la mesa; la fecha de castigo al predecir el impago; el precio por metro cuadrado al predecir el precio. Se delatan por métricas demasiado buenas. \pause
+  \item \textbf{Información del futuro:} usar el desempleo de diciembre para ``predecir'' el de octubre. Toda variable debe existir en el momento de decidir. \pause
+  \item \textbf{Duplicados y grupos:} el mismo inmueble publicado dos veces cae en entrenamiento y en prueba; varias mesas del mismo puesto se reparten entre pliegues. El modelo recuerda, no generaliza. \pause
+  \item \textbf{Afinar con la prueba:} elegir el modelo mirándola y luego reportarla.
+\end{enumerate}
+\pause
+\begin{block}{Cómo se ve en un paper: Neunhoeffer \& Sternberg (2019)}
+Reexaminan un artículo donde un bosque aleatorio parecía predecir guerras civiles mucho mejor que la logística: parte de la ventaja venía de un CV que dejó filtrar información de la evaluación hacia el ajuste. Corregido el protocolo, la ventaja se reduce sustancialmente. \textbf{El protocolo es parte del resultado.}
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 4: CUANDO EL K-FOLD ALEATORIO MIENTE
+%%#################################################
+%%#################################################
+\section{Cuando el $k$-fold aleatorio miente: tiempo y espacio}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Datos en el tiempo: validar hacia adelante}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.62]
+\foreach \row/\tr in {0/3, 1/4, 2/5} {
+  \node[font=\scriptsize] at (-1.1,-0.85*\row+0.3) {origen \the\numexpr\row+1\relax};
+  \draw[fill=blue!12] (0,-0.85*\row) rectangle (1.3*\tr,-0.85*\row+0.6);
+  \draw[fill=orange!30] (1.3*\tr,-0.85*\row) rectangle (1.3*\tr+1.3,-0.85*\row+0.6);
+}
+\foreach \t in {0,...,6} \node[font=\tiny] at (1.3*\t+0.65,-2.35) {$t_{\the\numexpr\t+1\relax}$};
+\draw[->] (0,-2.0) -- (9.3,-2.0);
+\node[font=\scriptsize, fill=blue!12, draw] at (10.6,0.3) {entrenar};
+\node[font=\scriptsize, fill=orange!30, draw] at (10.6,-0.55) {predecir};
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item Con series de tiempo \textbf{no se barajan} los pliegues: barajar deja que el futuro entrene al pasado, y el modelo aprende tendencias y ciclos que en producción no conocerá.
+  \item \textbf{Origen rodante} (o ventana móvil): entrenar hasta $t$, predecir $t+h$; avanzar el origen; promediar. El error resultante es el \emph{pseudo-fuera-de-muestra} de la literatura de pronóstico. \pause
+  \item Un matiz de Goulet Coulombe et al.\ (2022): para \textbf{afinar} hiperparámetros en pronóstico macro, el $k$-fold resultó tan bueno como las alternativas; para \textbf{evaluar} el pronóstico, no hay sustituto para el esquema hacia adelante.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Datos en el espacio: vecinos que se copian}
+\small
+\begin{columns}[T]
+\begin{column}{0.46\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.42]
+\begin{scope}
+  \foreach \x/\y/\c in {0/0/blue, 1/0/red, 2/0/green, 3/0/orange, 4/0/blue, 0/1/orange, 1/1/green, 2/1/blue, 3/1/red, 4/1/green, 0/2/red, 1/2/blue, 2/2/orange, 3/2/green, 4/2/red, 0/3/green, 1/3/orange, 2/3/red, 3/3/blue, 4/3/orange} \draw[fill=\c!35] (\x,\y) rectangle (\x+1,\y+1);
+  \node[font=\scriptsize] at (2.5,-0.7) {$k$-fold aleatorio};
+\end{scope}
+\begin{scope}[shift={(6.5,0)}]
+  \foreach \x/\y/\c in {0/0/blue, 1/0/blue, 2/0/blue, 3/0/red, 4/0/red, 0/1/blue, 1/1/blue, 2/1/blue, 3/1/red, 4/1/red, 0/2/green, 1/2/green, 2/2/green, 3/2/orange, 4/2/orange, 0/3/green, 1/3/green, 2/3/green, 3/3/orange, 4/3/orange} \draw[fill=\c!35] (\x,\y) rectangle (\x+1,\y+1);
+  \node[font=\scriptsize] at (2.5,-0.7) {bloques espaciales};
+\end{scope}
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.54\textwidth}
+\vspace{0.05cm}
+\begin{itemize}\itemsep3pt
+  \item Mesas vecinas (o inmuebles de la misma cuadra) comparten lo que el modelo no observa. Si una cae en entrenamiento y la otra en validación, el modelo \emph{interpola} entre vecinas y el CV luce mejor de lo que el modelo es.
+  \item \textbf{CV por bloques} (Roberts et al., 2017): los pliegues son regiones contiguas; cada pliegue es un ``lugar nuevo''.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.1cm}
+\begin{itemize}\itemsep3pt
+  \item Deppner \& Cajias (2024) lo muestran con modelos hedónicos de árboles: los errores del remuestreo no espacial son ``excesivamente optimistas'', y el CV espacial da estimaciones más confiables y modelos que generalizan mejor.
+  \item El mismo principio aplica a cualquier \textbf{grupo}: hogares en panel, estudiantes en colegios, mesas en puestos. Se deja fuera el grupo entero.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Qué pregunta responde cada esquema?}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lp{5.2cm}p{3.6cm}}
+\hline
+Esquema & Pregunta que responde & Cuándo es la correcta \\
+\hline
+$k$-fold aleatorio & ¿qué tan bien predigo mesas nuevas en lugares y años ya vistos? & interpolar en la misma población \\
+Bloques espaciales & ¿qué tan bien predigo en un departamento que el modelo nunca vio? & extrapolar a lugares nuevos \\
+Hacia adelante & ¿qué tan bien predigo el próximo período? & pronosticar \\
+Por grupos & ¿qué tan bien predigo para una unidad nueva (hogar, colegio)? & datos jerárquicos o de panel \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item Roberts et al.\ advierten el reverso: bloquear puede obligar a \emph{extrapolar} en el espacio de los predictores; el error es honesto para esa tarea y pesimista para la otra. Gelvez et al.\ (2026) usan CV aleatorio estratificado y lo dicen: miden recuperabilidad \emph{dentro} de la elección, no pronóstico. Hoy calculamos también la versión por departamentos.
+\end{itemize}
+\pause
+\begin{block}{Regla}
+Elijan el esquema de validación según la \textbf{predicción que van a hacer}, y digan cuál eligieron.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 5: BOOTSTRAP
+%%#################################################
+%%#################################################
+\section{\emph{Bootstrap}: intervalos para las métricas}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{\emph{Bootstrap}: la idea}
+\small
+\textbf{Pregunta distinta:} ¿qué tan \textbf{incierto} es un estadístico para el que no hay fórmula de error estándar? Una AUC, un $R^2$ de prueba, la diferencia de RMSE entre dos modelos.
+\pause
+\vspace{0.1cm}
+\textbf{El principio \emph{plug-in}} (Efron, 1979): no podemos remuestrear del mundo, pero la muestra es nuestra mejor estimación del mundo. Entonces:
+\begin{enumerate}\itemsep3pt
+  \item Extraer $B$ \textbf{remuestras con reemplazo} de tamaño $n$ de la propia muestra.
+  \item Calcular el estadístico $\hat{\theta}^{*b}$ en cada una.
+  \item La dispersión de las $B$ réplicas estima la incertidumbre:
+\end{enumerate}
+\[ \widehat{\mathrm{EE}}(\hat{\theta}) \;=\; \sqrt{ \frac{1}{B-1} \sum_{b=1}^{B} \big( \hat{\theta}^{*b} - \bar{\theta}^{*} \big)^2 }, \qquad \text{IC}_{95\%} = \big[ \hat{\theta}^{*}_{(0{,}025)},\; \hat{\theta}^{*}_{(0{,}975)} \big]. \]
+\pause
+\begin{itemize}\itemsep3pt
+  \item El intervalo por \textbf{percentiles} no necesita normalidad ni fórmulas: $B = 1.000$ suele bastar.
+  \item Lo usaremos tres veces: hoy para las métricas; en la sesión 6, las remuestras \emph{son} el \emph{bagging}; en la sesión 9, para los intervalos de los bosques causales.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Intervalos para las métricas y comparación de modelos}
+\small
+\textbf{Sobre la prueba:} remuestrear las $n_t$ observaciones de prueba, recalcular la métrica en cada remuestra y tomar los percentiles. Vale para cualquier métrica.
+\pause
+\begin{itemize}\itemsep3pt
+  \item ``AUC $= 0{,}91$'' sin intervalo es un número sin escala: con 2.400 mesas de prueba el intervalo es angosto; con 200 hogares, no. Las tablas de Gelvez et al.\ (2026) traen estimaciones puntuales; hoy les ponemos el intervalo. \pause
+  \item \textbf{Comparar dos modelos:} sus métricas se calcularon sobre las \emph{mismas} observaciones. Se remuestrea la \textbf{diferencia}; si su intervalo excluye el cero, la ventaja es real. \pause
+  \item \textbf{Sobre el CV:} los $k$ errores también dan un error estándar, pero los pliegues comparten datos y ese EE es optimista (Bengio \& Grandvalet, 2004): sirve para la regla 1-SE, no para un test.
+\end{itemize}
+\pause
+\begin{block}{Con muchos modelos}
+Elegir entre veinte configuraciones la que gana por dos milésimas es azar disfrazado: para eso existen la regla 1-SE y la parsimonia. Es el problema de las pruebas múltiples (ISL, cap.\ 13) en versión predictiva.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{\emph{Bootstrap} y el error \emph{out-of-bag}}
+\small
+\textbf{Dato clave:} ¿qué fracción de las observaciones originales aparece en una remuestra?
+\[ P(i \in \text{remuestra}) \;=\; 1 - \Big(1 - \frac{1}{n}\Big)^{n} \;\xrightarrow[n \to \infty]{}\; 1 - e^{-1} \;\approx\; 0{,}632. \]
+\pause
+\begin{itemize}\itemsep4pt
+  \item Cada remuestra contiene cerca del 63\% de las observaciones (la cuenta, en el apéndice); el 37\% restante queda \textbf{afuera} (\emph{out-of-bag}, OOB).
+  \item Esas observaciones son datos de validación \emph{gratis} para el modelo ajustado en esa remuestra: predecir cada $i$ solo con los modelos de las remuestras que \textbf{no} la contienen, y promediar.
+\end{itemize}
+\pause
+\vspace{0.1cm}
+\begin{block}{Anticipo de la sesión 6}
+Un bosque aleatorio es un promedio de modelos ajustados sobre remuestras \emph{bootstrap}. Su error OOB es un estimador del error de prueba \textbf{sin CV adicional}, y por eso se afina tan rápido.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 6: APLICACIÓN GUIADA
+%%#################################################
+%%#################################################
+\section{Aplicación guiada: los modelos de las sesiones 2 y 3, validados}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Los datos y las preguntas}
+\small
+\textbf{Datos:} los dos de las sesiones anteriores. Vivienda en Bogotá (OLS básico, OLS flexible con \emph{splines} e interacciones, $k$-NN) y mesas de 2022, primera vuelta (logística, $k$-NN).
+\pause
+\vspace{0.1cm}
+\textbf{Tres preguntas:}
+\begin{enumerate}\itemsep3pt
+  \item ¿Qué modelo gana por CV \textbf{dentro del entrenamiento}, y con qué $k$ o cuántos nodos? Con intervalos, no solo con promedios.
+  \item ¿Coincide el CV con la prueba? Si el CV dice 0,90 y la prueba 0,80, algo se filtró.
+  \item Para las mesas: ¿cuánto cae la AUC cuando los pliegues son \textbf{departamentos enteros} en vez de mesas al azar?
+\end{enumerate}
+\pause
+\vspace{0.1cm}
+\textbf{Decisiones antes de ajustar nada:}
+\begin{itemize}\itemsep2pt
+  \item CV de 5 pliegues, estratificado (por deciles del precio; por clase en las mesas), repetido 3 veces para $k$-NN.
+  \item Grilla de $k \in \{5, 15, 25, 51, 101\}$; regla 1-SE hacia el $k$ más grande. Nodos de los \emph{splines}: $\{3, 4, 6, 8\}$.
+  \item La receta (imputación, escala, \emph{dummies}, \emph{splines}) vive dentro del \emph{pipeline}. La prueba sigue bajo llave y se abre una vez.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La tabla: CV contra prueba, con intervalos}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{llccc}
+\hline
+Datos & Modelo & CV (media $\pm$ EE) & Prueba & IC 95\% \\
+\hline
+Vivienda, RMSE & OLS básico & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+ & OLS flexible (nodos por CV) & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+ & $k$-NN ($k$ por CV, 1-SE) & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+Mesas, AUC & Logística & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+ & $k$-NN ($k$ por CV, 1-SE) & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\vspace{0.1cm}
+\textbf{Un ancla publicada.} Gelvez et al.\ (2026, Tabla A5) reportan, para el bosque, el F1 medio del CV de 5 pliegues con el que se afinó y el F1 en la prueba:
+\begin{center}
+\footnotesize
+\begin{tabular}{lccc}
+\hline
+ & 2014-I & 2018-I & 2022-I \\
+\hline
+F1 en CV (afinación) & 0,781 & 0,829 & 0,868 \\
+F1 en la prueba & 0,769 & 0,831 & 0,873 \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\begin{itemize}\itemsep2pt
+  \item Diferencias de una centésima en ambas direcciones: el CV estimó bien lo que la prueba confirmó. Eso es lo que esperamos ver en nuestra tabla; una brecha grande sería la señal de una filtración.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{CV espacial con las mesas: ¿qué tan lejos generaliza el modelo?}
+\small
+\textbf{Diseño:} los mismos modelos, pero los cinco pliegues son \textbf{grupos de departamentos}: cada pliegue deja fuera regiones enteras.
+\pause
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{lcc}
+\hline
+AUC en CV, mesas 2022-I & aleatorio & por departamento \\
+\hline
+Logística con indicadores de dpto. & \textcolor{gray}{en clase} & no aplica \\
+Logística sin indicadores de dpto. & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+$k$-NN & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Un detalle que enseña:} con pliegues por departamento, los indicadores de departamento no sirven (el de validación nunca se vio): hay que quitarlos, y la comparación justa es entre las filas sin indicadores. \pause
+  \item \textbf{Lo que esperamos:} una caída de la AUC. Su tamaño mide cuánto del desempeño es estructura \emph{regional} y cuánto viaja de un departamento a otro con las características censales. \pause
+  \item \textbf{Cómo leerlo:} ninguna AUC es ``la verdadera''. La aleatoria responde a Gelvez et al.; la espacial responde ``¿y en un departamento nuevo?''. Reportar las dos es reportar el alcance del modelo.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}[fragile]{Cómo se ve en R (\texttt{tidymodels})}
+\scriptsize
+\begin{verbatim}
+library(tidymodels); set.seed(2026)
+folds <- vfold_cv(train, v = 5, strata = ganador)
+knn_spec <- nearest_neighbor(neighbors = tune()) |>
+  set_engine("kknn") |> set_mode("classification")
+wf  <- workflow(rec, knn_spec)            # la receta de la sesión 3
+res <- tune_grid(wf, resamples = folds,
+  grid = tibble(neighbors = c(5, 15, 25, 51, 101)),
+  metrics = metric_set(roc_auc))
+collect_metrics(res)                      # media y error estándar
+best <- select_by_one_std_err(res, desc(neighbors),
+                              metric = "roc_auc")
+final <- finalize_workflow(wf, best) |> last_fit(split)  # una vez
+pred  <- collect_predictions(final)
+boot  <- bootstraps(pred, times = 1000) |>
+  mutate(auc = map_dbl(splits, \(s)
+    roc_auc(analysis(s), ganador, .pred_1)$.estimate))
+quantile(boot$auc, c(.025, .975))         # IC 95 % bootstrap
+# CV espacial: group_vfold_cv(train, group = departamento, v = 5)
+\end{verbatim}
+\normalsize
+\small
+\begin{itemize}\itemsep2pt
+  \item \texttt{tune\_grid} ajusta la receta y el modelo \textbf{dentro de cada pliegue}; \texttt{last\_fit} reajusta con todo el entrenamiento y evalúa en la prueba una sola vez. \texttt{group\_vfold\_cv} deja fuera grupos enteros.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Presentación estudiantil: el paper de la sesión 3}
+\framesubtitle{Quince minutos, tres preguntas}
+\small
+Kleinberg et al.\ (2018) o Fuster et al.\ (2022), a elección de quien presenta.
+\begin{enumerate}\itemsep5pt
+  \item \textbf{¿Qué se predice y qué decisión depende de ello?} El riesgo de no comparecer y la decisión de liberar; la probabilidad de impago y la decisión de prestar (y a qué tasa).
+  \item \textbf{¿Con qué datos y método, y cómo se evalúa?} Qué modelo, qué partición, qué métrica, y sobre todo: ¿qué observaciones \emph{faltan}? (solo se observa el resultado de los liberados; solo el de los créditos aprobados).
+  \item \textbf{¿Qué se encuentra y cómo se interpreta?} La ganancia frente al juez o frente al logit, y para quién: ¿se reparte igual entre grupos?
+\end{enumerate}
+\pause
+\vspace{0.15cm}
+\begin{block}{Para el resto de la sala}
+Mientras escuchan, busquen la filtración posible: ¿qué variable no estaría disponible en el momento de decidir? ¿Qué pasaría con la evaluación si el conjunto de prueba solo contiene a quienes el sistema actual ya aprobó? Es la sesión de hoy aplicada a un paper.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 7: INTERPRETACIÓN Y CIERRE
+%%#################################################
+%%#################################################
+\section{Interpretación y cierre}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Qué dice un número de CV y qué no dice}
+\small
+\begin{itemize}\itemsep5pt
+  \item \textbf{Estima el error de un procedimiento}, no de un modelo concreto: el error promedio de ``ajustar esta receta y este modelo a muestras de tamaño $(k-1)n/k$''. Por eso es algo pesimista y por eso se reajusta con todo el entrenamiento al final. \pause
+  \item \textbf{El CV con el que se eligió es optimista para el elegido.} El número que se reporta sale de la prueba, o de un lazo externo. \pause
+  \item \textbf{Responde la pregunta de su esquema:} aleatorio, por bloques, hacia adelante. Un modelo con AUC de 0,93 en CV aleatorio puede tener 0,80 en un departamento nuevo, y las dos cifras son verdad. \pause
+  \item \textbf{Los hiperparámetros elegidos son parte del resultado.} El $k$ o los nodos que ganaron dicen cuánta flexibilidad soportan los datos: $k = 101$ en las mesas cuenta una historia distinta de $k = 5$.
+\end{itemize}
+\pause
+\begin{block}{$Y$, no $\beta$, versión validación}
+En Inferencia Causal la especificación se defiende con teoría e identificación. Aquí se defiende con el \emph{pipeline}: cómo se partió, cómo se afinó, dónde se midió. Un resultado predictivo sin ese protocolo no es reproducible ni comparable.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cuándo usar qué, y qué leer}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lp{5.4cm}}
+\hline
+Situación & Esquema \\
+\hline
+Datos tabulares sin estructura & $k$-fold estratificado, $k = 5$ o $10$; repetido si $n$ es pequeño \\
+Series de tiempo & origen rodante o ventana móvil; nunca barajar \\
+Datos espaciales o en grupos & bloques o \emph{leave-group-out}; quitar las variables que identifican el grupo \\
+Elegir hiperparámetros & CV interno con grilla pequeña o búsqueda aleatoria/bayesiana; regla 1-SE \\
+Comparar modelos & mismos pliegues para todos; diferencia con intervalo \emph{bootstrap} \\
+Reportar & prueba una sola vez, con intervalo \emph{bootstrap}; decir qué esquema de CV afinó \\
+$n$ muy pequeño, sin prueba aparte & CV anidado o LOOCV; reportar la incertidumbre con honestidad \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\vspace{0.1cm}
+\textbf{Qué leer:} ISL cap.\ 5 (CV y \emph{bootstrap} con las figuras de clase); Roberts et al.\ (2017) para el CV por bloques; Neunhoeffer \& Sternberg (2019) como advertencia de tres páginas; Kuhn \& Silge (2022), caps.\ 10--13, para el \emph{pipeline} en \texttt{tidymodels}.
+\end{frame}
+
+%%=================================================
+\begin{frame}{Recap}
+\small
+\begin{enumerate}\itemsep6pt
+  \item \textbf{La prueba responde una pregunta y una sola vez.} Elegir modelos e hiperparámetros se hace \textbf{dentro del entrenamiento}, remuestreándolo.
+  \item \textbf{Validación cruzada:} $k$-fold estratificado ($k = 5$ o $10$); la curva de CV con sus barras; el mínimo o la regla 1-SE; grilla, aleatoria o bayesiana para buscar; anidado cuando el número reportado también se eligió.
+  \item \textbf{Regla de oro \#3:} el CV valida \emph{pipelines}. Todo lo que aprende de los datos (imputar, escalar, seleccionar, remuestrear) ocurre dentro de cada pliegue. La historia de los 5.000 predictores.
+  \item \textbf{El $k$-fold aleatorio miente} con tiempo, espacio y grupos: validar hacia adelante, por bloques, por grupos. Cada esquema responde una pregunta distinta; hay que decir cuál.
+  \item \textbf{\emph{Bootstrap}:} intervalos para cualquier métrica y para la diferencia entre modelos; el 63\% y el error \emph{out-of-bag}, que reaparece con los bosques.
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}
+\vspace{2.0cm}
+\Large{Preparación para la próxima clase\ldots}
+\end{frame}
+
+%%#################################################
+%%#################################################
+%% PARTE 8: PRÓXIMA CLASE
+%%#################################################
+%%#################################################
+
+%%=================================================
+\begin{frame}{Para aprovechar al máximo la próxima sesión}
+\small
+\textbf{Lecturas obligatorias de esta semana:}
+\begin{itemize}\itemsep4pt
+  \item ISL, cap.\ 5 (secs.\ 5.1--5.2). \\ \textcolor{gray}{Guía: las figuras 5.2 a 5.6 son las de clase; la sección 5.2 es el \emph{bootstrap}.}
+  \item Roberts et al.\ (2017), \emph{Cross-validation strategies for data with temporal, spatial, hierarchical, or phylogenetic structure}, \emph{Ecography}. \\ \textcolor{gray}{Guía: secciones 1--3 y las recomendaciones finales; sáltense las simulaciones.}
+  \item Neunhoeffer \& Sternberg (2019), \emph{How Cross-Validation Can Go Wrong and What to Do About It}, \emph{Political Analysis}. \\ \textcolor{gray}{Guía: tres páginas; léanla completa.}
+\end{itemize}
+\textbf{Para la presentación estudiantil de la sesión 5:} Deppner \& Cajias (2024), JREFE, o Goulet Coulombe, Leroux, Stevanovic \& Surprenant (2022), \emph{Journal of Applied Econometrics}.
+\pause
+\vspace{0.1cm}
+\textbf{Próxima sesión --- selección de variables y regularización:} muchos predictores, sobreajuste y colinealidad; Ridge (encoger) y Lasso (ceros exactos); $\lambda$ por CV con la curva de hoy; PCR y la intuición de PCA; y por qué ``el Lasso selecciona predictores, no causas''. Lectura previa: ISL cap.\ 6 (secs.\ 6.1--6.2).
+\pause
+\vspace{0.1cm}
+\textbf{Aplicación de esta semana en R:} la tabla CV contra prueba con intervalos para vivienda y mesas, y el CV espacial por departamentos.
+\end{frame}
+
+%%=================================================
+%% Referencias
+\begin{frame}{Referencias esenciales}
+\scriptsize
+\begin{itemize}\itemsep2pt
+  \item James, G., Witten, D., Hastie, T., \& Tibshirani, R. (2021). \emph{An Introduction to Statistical Learning} (2.\ ed.). Springer. Cap.\ 5. [ISL]
+  \item Efron, B. (1979). Bootstrap Methods: Another Look at the Jackknife. \emph{Annals of Statistics}, 7(1), 1--26.
+  \item Bergstra, J., \& Bengio, Y. (2012). Random Search for Hyper-Parameter Optimization. \emph{JMLR}, 13, 281--305.
+  \item Snoek, J., Larochelle, H., \& Adams, R.\ P. (2012). Practical Bayesian Optimization of Machine Learning Algorithms. \emph{NeurIPS} 25.
+  \item Bengio, Y., \& Grandvalet, Y. (2004). No Unbiased Estimator of the Variance of K-Fold Cross-Validation. \emph{JMLR}, 5, 1089--1105.
+  \item Roberts, D.\ R., et al.\ (2017). Cross-validation strategies for data with temporal, spatial, hierarchical, or phylogenetic structure. \emph{Ecography}, 40(8), 913--929.
+  \item Neunhoeffer, M., \& Sternberg, S. (2019). How Cross-Validation Can Go Wrong and What to Do About It. \emph{Political Analysis}, 27(1), 101--106.
+  \item Deppner, J., \& Cajias, M. (2024). Accounting for Spatial Autocorrelation in Algorithm-Driven Hedonic Models: A Spatial Cross-Validation Approach. \emph{Journal of Real Estate Finance and Economics}.
+  \item Goulet Coulombe, P., Leroux, M., Stevanovic, D., \& Surprenant, S. (2022). How Is Machine Learning Useful for Macroeconomic Forecasting? \emph{Journal of Applied Econometrics}, 37(5), 920--964.
+  \item Gelvez, J.\ D., Cardiles, A., Martínez-González, E.\ F., \& Muñoz, M. (2026). How Predictable Is an Election? Documento de trabajo.
+\end{itemize}
+\normalsize
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% APÉNDICE: PARA PROFUNDIZAR
+%%#################################################
+%%#################################################
+\appendix
+\section{Apéndice: para profundizar}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{A1. El atajo de LOOCV en regresión lineal}
+\small
+Para mínimos cuadrados (y cualquier suavizador lineal) existe una identidad: con \textbf{un solo ajuste} sobre todos los datos,
+\[ \mathrm{CV}_{(n)} \;=\; \frac{1}{n} \sum_{i=1}^{n} \left( \frac{y_i - \hat{y}_i}{1 - h_i} \right)^2, \]
+donde $h_i$ es el \emph{leverage} de la observación $i$: el elemento $i$ de la diagonal de $\mathbf{H} = \mathbf{X}(\mathbf{X}'\mathbf{X})^{-1}\mathbf{X}'$.
+\pause
+\vspace{0.1cm}
+\begin{itemize}\itemsep4pt
+  \item \textbf{Intuición:} una observación con \emph{leverage} alto ``atrae'' la recta hacia sí misma y su residuo dentro de muestra es artificialmente pequeño. Dividir por $(1 - h_i)$ deshace ese favor.
+  \item El costo pasa de $n$ ajustes a \textbf{uno}. Con $\sum_i h_i = p + 1$, el \emph{leverage} promedio es $(p+1)/n$: la corrección crece con la complejidad del modelo, como los criterios de información de la sesión 5.
+\end{itemize}
+\pause
+\begin{block}{Alcance}
+Vale para OLS, \emph{splines} y otros suavizadores lineales. Para árboles, \emph{boosting} o redes no hay atajo: por eso en la práctica domina el $k$-fold.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A2. La cuenta del 0,632 y el estimador \emph{out-of-bag}}
+\small
+\textbf{1. Una observación fija $i$.} En cada extracción con reemplazo, $P(\text{no sale } i) = 1 - 1/n$. Las $n$ extracciones son independientes:
+\[ P(i \notin \text{remuestra}) = \Big(1 - \frac{1}{n}\Big)^{n} \;\xrightarrow[n \to \infty]{}\; e^{-1} \approx 0{,}368, \]
+así que $P(i \in \text{remuestra}) \to 0{,}632$. Con $n = 100$ ya da $0{,}634$: el límite es una excelente aproximación.
+\pause
+\vspace{0.1cm}
+\textbf{2. El estimador OOB.} Con $B$ remuestras y un modelo $\hat{f}^{*b}$ por remuestra, para cada $i$ se promedian solo los modelos que no la vieron:
+\[ \widehat{\mathrm{Err}}_{\text{OOB}} \;=\; \frac{1}{n}\sum_{i=1}^{n} \frac{1}{|B_{-i}|} \sum_{b \in B_{-i}} L\big(y_i, \hat{f}^{*b}(x_i)\big), \]
+con $B_{-i}$ el conjunto de remuestras que no contienen a $i$.
+\pause
+\begin{itemize}\itemsep3pt
+  \item Cada $\hat{f}^{*b}$ se entrenó con cerca del 63\% de las observaciones distintas: el OOB es algo pesimista, como un CV con $k \approx 3$. Para un bosque grande la diferencia con el CV de 10 pliegues es pequeña y el costo, nulo.
+  \item ESL (sec.\ 7.11) propone el estimador ``0,632'', que mezcla el error OOB con el de entrenamiento para corregir ese pesimismo.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A3. Búsqueda bayesiana de hiperparámetros: la idea}
+\small
+\textbf{El problema:} cada evaluación de $\mathrm{CV}(\theta)$ para una configuración $\theta$ es cara (cinco ajustes de un bosque). Queremos encontrar el mínimo con pocas evaluaciones.
+\pause
+\vspace{0.1cm}
+\textbf{El algoritmo} (Snoek, Larochelle \& Adams, 2012):
+\begin{enumerate}\itemsep3pt
+  \item Evaluar unas pocas configuraciones iniciales (al azar).
+  \item Ajustar un \textbf{modelo sustituto} de $\mathrm{CV}(\theta)$ sobre lo evaluado: típicamente un proceso gaussiano, que da una media y una incertidumbre para cada $\theta$ no probado.
+  \item Elegir la siguiente $\theta$ maximizando una \textbf{función de adquisición}, por ejemplo la mejora esperada: alta donde la media predicha es baja \emph{o} donde la incertidumbre es grande (explotar vs.\ explorar).
+  \item Evaluar, actualizar el sustituto, repetir hasta agotar el presupuesto.
+\end{enumerate}
+\pause
+\begin{itemize}\itemsep3pt
+  \item Es la misma lógica de este curso aplicada al propio afinamiento: un modelo que predice el desempeño y una decisión bajo incertidumbre.
+  \item En R: \texttt{tune::tune\_bayes()}; en Python, \texttt{optuna} o \texttt{scikit-optimize}. Gelvez et al.\ (2026) usan 100 iteraciones sobre cinco hiperparámetros del bosque.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+%% End document
+\end{document}

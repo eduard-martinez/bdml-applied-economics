@@ -1,0 +1,932 @@
+\documentclass{beamer}
+
+%% Tema y configuraciones
+\usetheme{Boadilla}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=.,      % color de enlaces internos (índices, refs)
+    urlcolor=blue,    % color de URLs
+    citecolor=.,      % color de referencias bibliográficas
+}
+
+%% Helpers (macros y notación)
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\1}{\mathbb{I}}
+\newcommand{\MSE}{\mathrm{MSE}}
+\newcommand{\RSS}{\mathrm{RSS}}
+\newcommand{\sign}{\mathrm{sign}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+%% Encabezado
+\title[BDML]{Big Data y Machine Learning \\ para Economía Aplicada}
+\subtitle{Week 05: Selección de variables y regularización}
+\author{Eduard F. Martinez Gonzalez, Ph.D.}
+\institute[]{Departamento de Economía, Universidad Icesi}
+\date{\today}
+
+%%=================================================
+%% Begin document
+\begin{document}
+
+%%=================================================
+%% Primer slide
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%=================================================
+\begin{frame}{Previously\ldots}
+\small
+\begin{itemize}\itemsep4pt
+  \item \textbf{La prueba responde una pregunta y una sola vez;} elegir modelos e hiperparámetros se hace dentro del entrenamiento con validación cruzada: la curva de CV con sus barras, el mínimo o la regla 1-SE. \pause
+  \item \textbf{Regla de oro \#3:} el CV valida \emph{pipelines}: todo lo que aprende de los datos ocurre dentro de cada pliegue. \pause
+  \item El $k$-fold aleatorio miente con tiempo, espacio y grupos; el \emph{bootstrap} pone intervalos a cualquier métrica. \pause
+  \item Y desde la sesión 2 arrastramos una promesa: con muchos predictores, OLS sobreajusta y ``algo de sesgo a cambio de mucha varianza'' mejora la predicción. Hoy se cumple.
+\end{itemize}
+\pause
+\begin{block}{Hoy}
+Predecir con \textbf{muchos predictores} sin sobreajustar: seleccionar (subconjuntos, criterios), \textbf{encoger} (Ridge, Lasso, Elastic Net) y \textbf{comprimir} (PCR, PLS). El hiperparámetro $\lambda$ se elige con la curva de CV de la semana pasada. Y una lección que vale por toda la sesión: lo que sobrevive a la penalización son \emph{predictores}, no \emph{causas}.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 1: MUCHOS PREDICTORES
+%%#################################################
+%%#################################################
+\section{Muchos predictores: qué falla y por qué}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{De dónde salen tantos predictores}
+\small
+\begin{itemize}\itemsep4pt
+  \item \textbf{Datos administrativos y transaccionales:} cientos de características por unidad. \pause
+  \item \textbf{Texto e imágenes convertidos en variables:} miles de columnas (sesión 8). \pause
+  \item \textbf{Flexibilidad que nosotros mismos creamos:} \emph{dummies} finas, polinomios, \emph{splines} e interacciones. Con 30 variables base y sus interacciones de a pares, $30 + \binom{30}{2} = 465$ regresores; con cuadrados y triples, miles. \pause
+\end{itemize}
+\vspace{0.1cm}
+\textbf{Tres regímenes:}
+\begin{enumerate}\itemsep3pt
+  \item $p$ fijo y $n \to \infty$: Econometría I; OLS funciona.
+  \item $p$ comparable a $n$: OLS ``funciona'' pero tiembla: varianzas enormes, coeficientes inestables.
+  \item $p > n$: OLS ni siquiera está definido de manera única.
+\end{enumerate}
+\pause
+\begin{block}{El punto}
+La alta dimensión aparece apenas uno controla \emph{flexiblemente} por covariables: lo que hicimos con la vivienda en la sesión 2.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Qué falla, exactamente: información por parámetro}
+\small
+\textbf{Con $p > n$:} $\mathbf{X}'\mathbf{X}$ es singular; existen infinitos $\beta$ que ajustan los datos \textbf{perfectamente} ($\RSS = 0$, $R^2 = 1$) sin que haya ninguna relación real. Es la memorización de la sesión 1 en su forma más pura: el ajuste dentro de muestra pierde todo contenido informativo.
+\pause
+\vspace{0.1cm}
+\textbf{Con $p < n$ pero predictores muy correlacionados:} sean $d_1 \geq \cdots \geq d_p > 0$ los autovalores de $\mathbf{X}'\mathbf{X}$ y $v_j$ sus autovectores. La varianza de OLS en la dirección $v_j$ es
+\[ \Var\big(v_j'\hat{\beta}\big) \;=\; \frac{\sigma^2}{d_j}. \]
+En las direcciones con $d_j$ pequeño (combinaciones casi colineales) la varianza \textbf{explota}: los datos casi no varían ahí, casi no informan, y OLS adivina con enorme ruido.
+\pause
+\vspace{0.1cm}
+\begin{block}{Moraleja}
+El enemigo no es $p$ grande \emph{per se}: es la \textbf{información por parámetro}. Alta dimensión $=$ muchos parámetros persiguiendo poca variación independiente. Las tres salidas de hoy (seleccionar, encoger, comprimir) reducen el número efectivo de parámetros.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Seleccionar variables: subconjuntos y \emph{stepwise}}
+\small
+\textbf{Pregunta previa:} ¿por qué no comparar modelos por su $R^2$?
+\pause
+\textcolor{gray}{Porque \emph{siempre} mejora al agregar variables: es ajuste \emph{dentro} de muestra. Comparar un modelo de 3 variables con uno de 30 por $R^2$ es una carrera arreglada.}
+\pause
+\vspace{0.1cm}
+\textbf{Los enfoques clásicos} (ISL 6.1):
+\begin{itemize}\itemsep3pt
+  \item \textbf{Mejor subconjunto:} probar los $2^p$ modelos. Con $p = 20$, un millón; con $p = 40$, $10^{12}$. Inviable rápido.
+  \item \textbf{\emph{Forward stepwise}:} empezar vacío y agregar en cada paso la variable que más mejora el ajuste ($\approx p^2/2$ ajustes). \textbf{\emph{Backward}:} empezar completo e ir quitando (requiere $n > p$). Ambos son \emph{greedy}: no garantizan el mejor subconjunto. \pause
+\end{itemize}
+\vspace{0.1cm}
+\begin{itemize}\itemsep3pt
+  \item En todos los casos queda la pregunta de fondo: entre el mejor modelo de 3 variables y el mejor de 8, \textbf{¿cuál gana?} Hay que corregir el optimismo del error de entrenamiento: con un criterio o con CV.
+  \item Y una decisión \emph{discreta} (dentro o fuera) es \textbf{inestable}: pequeñas perturbaciones de los datos cambian el modelo entero. Guarden esta objeción.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Criterios de información frente a la validación cruzada}
+\small
+\textbf{La idea común:} error de entrenamiento $+$ un castigo por parámetro usado ($d$ parámetros, $\hat{\sigma}^2$ estima la varianza del error):
+\[ C_p = \frac{1}{n}\big(\RSS + 2\,d\,\hat{\sigma}^2\big), \qquad \mathrm{BIC} = \frac{1}{n}\big(\RSS + \log(n)\,d\,\hat{\sigma}^2\big). \]
+El AIC es proporcional a $C_p$ en el modelo lineal gaussiano; el BIC castiga más ($\log n > 2$ para $n \geq 8$) y elige modelos más pequeños.
+\pause
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lll}
+\hline
+ & Criterios ($C_p$, AIC, BIC) & Validación cruzada \\
+\hline
+Costo & un ajuste & $k$ ajustes \\
+Supuestos & modelo casi correcto, $\hat{\sigma}^2$ & casi ninguno \\
+¿Qué es $d$? & claro en modelos lineales & no lo necesita \\
+¿Bosques, \emph{boosting}, redes? & no ($d$ mal definido) & \textbf{sí} \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item Los criterios nacieron cuando ajustar un modelo era \textbf{caro}. Hoy el cómputo es barato y los métodos son flexibles: ¿cuántos parámetros tiene un bosque? Nadie sabe.
+  \item \textbf{Veredicto del curso:} CV por defecto para todo; criterios como referencia rápida en modelos lineales clásicos.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 2: ENCOGER
+%%#################################################
+%%#################################################
+\section{Encoger: Ridge, Lasso y Elastic Net}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cambio de filosofía: de seleccionar a encoger}
+\small
+\begin{itemize}\itemsep4pt
+  \item \textbf{Seleccionar:} cada variable está dentro o fuera. Decisión discreta $\Rightarrow$ varianza alta.
+  \item \textbf{Encoger} (\emph{shrinkage}): mantener todas las variables pero \textbf{empujar los coeficientes hacia cero} de forma continua y controlada.
+\end{itemize}
+\pause
+\vspace{0.1cm}
+\textbf{Formulación general:}
+\[ \hat{\beta} \;=\; \argmin_{\beta} \; \underbrace{\sum_{i=1}^n \big(y_i - x_i'\beta\big)^2}_{\text{ajuste}} \;+\; \lambda \cdot \underbrace{\mathcal{P}(\beta)}_{\text{penalización}} \]
+\pause
+\begin{itemize}\itemsep4pt
+  \item $\lambda \geq 0$ es la \textbf{perilla continua} de complejidad: $\lambda = 0$ es OLS; $\lambda \to \infty$ manda todos los coeficientes a cero. Se elige por \textbf{CV} (la curva de la sesión 4).
+  \item \textbf{Parámetros:} $\beta$. \textbf{Hiperparámetros:} $\lambda$ (y $\alpha$ en Elastic Net). Hoy: tres penalizaciones $\mathcal{P}$, tres estimadores. Y la promesa de la sesión 1 en una frase: un poco de sesgo (encoger) compra mucha varianza cuando hay poca información por parámetro.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Ridge: encoger todo un poco}
+\small
+\textbf{Problema} (Hoerl \& Kennard, 1970): $\mathcal{P}(\beta) = \sum_j \beta_j^2$.
+\[ \hat{\beta}^{R} \;=\; \argmin_{\beta} \; \sum_{i=1}^n \big(y_i - x_i'\beta\big)^2 + \lambda \sum_{j=1}^p \beta_j^2 \qquad \Longrightarrow \qquad \hat{\beta}^{R} = (\mathbf{X}'\mathbf{X} + \lambda \mathbf{I})^{-1}\mathbf{X}'\mathbf{y}. \]
+\pause
+\begin{itemize}\itemsep3pt
+  \item La única diferencia con OLS es $\lambda$ sumado a la diagonal (la derivación, en el apéndice). Los autovalores de $\mathbf{X}'\mathbf{X} + \lambda\mathbf{I}$ son $d_j + \lambda > 0$: la inversa \textbf{siempre existe}, incluso con $p > n$, y las direcciones enfermas ($d_j$ pequeño) son las que más se encogen. Ridge desconfía donde los datos informan poco. \pause
+  \item Con $\mathbf{X}$ ortonormal, $\hat{\beta}^R_j = \hat{\beta}^{OLS}_j / (1 + \lambda)$: encogimiento \textbf{proporcional}; ningún coeficiente llega exactamente a cero. \pause
+  \item \textbf{Sesgo--varianza} (ISL, Fig.~6.5): al subir $\lambda$, la varianza cae rápido y el sesgo sube despacio; siempre existe un $\lambda > 0$ con menor MSE de prueba que OLS. Dónde está, lo dice el CV.
+\end{itemize}
+\pause
+\begin{block}{Cuándo brilla}
+Muchos predictores con efectos pequeños y repartidos, o muy correlacionados entre sí: encoger todo un poco es mejor que apostar por unos cuantos.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Detalles que no son detalles: escala e intercepto}
+\small
+\begin{itemize}\itemsep4pt
+  \item \textbf{La penalización no es invariante a la escala:} $\sum_j \beta_j^2$ castiga igual al coeficiente de ``ingreso en pesos'' que al de ``edad en años'', pero sus magnitudes no son comparables. Si mido el ingreso en miles, su $\beta$ se multiplica por mil y se penaliza de otra forma. \pause
+  \item \textbf{Solución:} \textbf{estandarizar} los predictores (media 0, desviación 1) antes de regularizar; así $\lambda$ trata a todos por igual. Los coeficientes se reportan de vuelta en la escala original. \pause
+  \item \textbf{El intercepto no se penaliza:} $\beta_0$ mide el nivel promedio de $y$, no la complejidad del modelo. Encogerlo sesgaría todas las predicciones sin ganar nada. \pause
+  \item \texttt{glmnet} estandariza y excluye el intercepto \textbf{por defecto}; hay que saber que lo hace.
+\end{itemize}
+\pause
+\begin{block}{Regla de oro \#3, otra vez}
+Las medias y desviaciones para estandarizar se calculan con los datos de entrenamiento \textbf{de cada pliegue}, no con toda la muestra: \texttt{step\_normalize()} dentro de la receta, como en la sesión 4.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Lasso: un valor absoluto que cambia todo}
+\small
+\textbf{Problema} (Tibshirani, 1996): $\mathcal{P}(\beta) = \sum_j |\beta_j|$.
+\[ \hat{\beta}^{L} \;=\; \argmin_{\beta} \; \sum_{i=1}^n \big(y_i - x_i'\beta\big)^2 + \lambda \sum_{j=1}^p |\beta_j| \]
+\pause
+\begin{itemize}\itemsep3pt
+  \item El único cambio frente a Ridge: $|\beta_j|$ en lugar de $\beta_j^2$. La consecuencia es enorme: para $\lambda$ suficientemente grande, algunos coeficientes son \textbf{exactamente cero}. \pause
+  \item El Lasso hace \textbf{dos trabajos a la vez}: encoge (control de varianza) \emph{y} selecciona variables (modelos esparsos, más fáciles de leer). \pause
+  \item No tiene solución cerrada (el valor absoluto no es diferenciable en cero). \texttt{glmnet} lo resuelve coordenada por coordenada en milisegundos; el algoritmo, la condición de optimalidad y el $\lambda_{\max}$ a partir del cual nadie entra, en el apéndice.
+\end{itemize}
+\pause
+\begin{block}{¿Por qué el valor absoluto produce ceros exactos?}
+La respuesta está en la \textbf{geometría} de la restricción.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La geometría: por qué el Lasso anula y Ridge no}
+\small
+Forma equivalente (restringida): minimizar $\RSS$ sujeto a $\mathcal{P}(\beta) \leq t$.
+\begin{center}
+\begin{tikzpicture}[scale=0.62]
+\begin{scope}[shift={(0,0)}]
+  \draw[->] (-1.7,0) -- (2.9,0) node[right, font=\scriptsize] {$\beta_1$};
+  \draw[->] (0,-1.5) -- (0,2.6) node[above, font=\scriptsize] {$\beta_2$};
+  \draw[fill=blue!12, thick] (1.0,0) -- (0,1.0) -- (-1.0,0) -- (0,-1.0) -- cycle;
+  \fill (1.9,1.5) circle (2pt) node[right, font=\scriptsize] {$\hat{\beta}^{OLS}$};
+  \draw[red] (1.9,1.5) ellipse (0.5 and 0.3);
+  \draw[red] (1.9,1.5) ellipse (1.0 and 0.6);
+  \draw[red] (1.9,1.5) ellipse (1.58 and 0.95);
+  \fill[blue] (0,1.0) circle (2.6pt) node[above left, font=\scriptsize] {$\hat{\beta}^{L}$};
+  \node[font=\footnotesize] at (0.6,-1.9) {\textbf{Lasso:} $|\beta_1| + |\beta_2| \leq t$};
+\end{scope}
+\begin{scope}[shift={(6.3,0)}]
+  \draw[->] (-1.7,0) -- (2.9,0) node[right, font=\scriptsize] {$\beta_1$};
+  \draw[->] (0,-1.5) -- (0,2.6) node[above, font=\scriptsize] {$\beta_2$};
+  \draw[fill=blue!12, thick] (0,0) circle (1.0);
+  \fill (1.9,1.5) circle (2pt) node[right, font=\scriptsize] {$\hat{\beta}^{OLS}$};
+  \draw[red] (1.9,1.5) ellipse (0.5 and 0.3);
+  \draw[red] (1.9,1.5) ellipse (1.0 and 0.6);
+  \draw[red] (1.9,1.5) ellipse (1.45 and 0.87);
+  \fill[blue] (0.62,0.79) circle (2.6pt) node[above left, font=\scriptsize] {$\hat{\beta}^{R}$};
+  \node[font=\footnotesize] at (0.6,-1.9) {\textbf{Ridge:} $\beta_1^2 + \beta_2^2 \leq t$};
+\end{scope}
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item La solución está donde las curvas de nivel del $\RSS$ (elipses) \textbf{tocan} la región factible (azul).
+  \item El diamante tiene \textbf{esquinas sobre los ejes} ($\beta_j = 0$): las elipses suelen tocar ahí primero $\Rightarrow$ ceros exactos. El círculo no tiene esquinas: el contacto casi nunca cae sobre un eje.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Los tres umbrales, cara a cara}
+\small
+Con $\mathbf{X}$ ortonormal, cada método transforma $\hat{\beta}^{OLS}_j$ así:
+\begin{center}
+\begin{tikzpicture}[scale=0.5]
+\begin{scope}[shift={(0,0)}]
+  \draw[->] (-2.3,0) -- (2.3,0); \draw[->] (0,-2.3) -- (0,2.3);
+  \draw[dashed, gray] (-2.1,-2.1) -- (2.1,2.1);
+  \draw[blue, very thick] (-2.1,-2.1) -- (-1,-1);
+  \draw[blue, very thick] (-1,0) -- (1,0);
+  \draw[blue, very thick] (1,1) -- (2.1,2.1);
+  \fill[blue] (-1,-1) circle (1.8pt); \fill[blue] (1,1) circle (1.8pt);
+  \node[font=\footnotesize] at (0,-2.9) {\textbf{Subconjunto} (duro)};
+\end{scope}
+\begin{scope}[shift={(6.2,0)}]
+  \draw[->] (-2.3,0) -- (2.3,0); \draw[->] (0,-2.3) -- (0,2.3);
+  \draw[dashed, gray] (-2.1,-2.1) -- (2.1,2.1);
+  \draw[blue, very thick] (-2.1,-1.24) -- (2.1,1.24);
+  \node[font=\footnotesize] at (0,-2.9) {\textbf{Ridge} ($\times \frac{1}{1+\lambda}$)};
+\end{scope}
+\begin{scope}[shift={(12.4,0)}]
+  \draw[->] (-2.3,0) -- (2.3,0); \draw[->] (0,-2.3) -- (0,2.3);
+  \draw[dashed, gray] (-2.1,-2.1) -- (2.1,2.1);
+  \draw[blue, very thick] (-2.1,-1.1) -- (-1,0);
+  \draw[blue, very thick] (-1,0) -- (1,0);
+  \draw[blue, very thick] (1,0) -- (2.1,1.1);
+  \node[font=\footnotesize] at (0,-2.9) {\textbf{Lasso} (suave)};
+\end{scope}
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Subconjunto} $=$ umbral \textbf{duro}: conserva intactos los grandes y elimina los chicos, con un salto: la inestabilidad de la selección.
+  \item \textbf{Ridge} $=$ encogimiento proporcional: nunca llega a cero.
+  \item \textbf{Lasso} $=$ umbral \textbf{suave}: $\hat{\beta}^{L}_j = \sign(\hat{\beta}_j)\,(|\hat{\beta}_j| - \lambda)_{+}$; corre todo hacia cero y corta. Continuo \emph{y} esparso: lo mejor de los dos mundos (la derivación, en el apéndice).
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Elegir $\lambda$ por CV: la curva de la sesión 4, con $\lambda$ en el eje}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.58]
+  \draw[->] (0,0) -- (8.0,0) node[below, font=\scriptsize] {$\log \lambda$ (más penalización $\rightarrow$ más simple)};
+  \draw[->] (0,0) -- (0,4.0) node[above, font=\scriptsize] {RMSE de CV};
+  \foreach \x/\y in {0.6/3.0, 1.4/2.35, 2.2/1.95, 2.9/1.8, 3.6/1.85, 4.3/2.0, 5.0/2.25, 5.8/2.6, 6.6/3.05, 7.4/3.5} {
+    \draw[gray] (\x,\y-0.32) -- (\x,\y+0.32);
+    \fill[red] (\x,\y) circle (2.3pt);
+  }
+  \draw[dashed, gray, thick] (2.9,0) -- (2.9,3.6);
+  \node[font=\scriptsize] at (2.9,3.85) {$\lambda_{\min}$};
+  \draw[dashed, blue, thick] (4.3,0) -- (4.3,3.6);
+  \node[font=\scriptsize, blue] at (4.5,3.85) {$\lambda_{1SE}$};
+  \node[font=\scriptsize, gray] at (0.9,3.55) {$\approx$ OLS};
+  \node[font=\scriptsize, gray] at (7.2,3.9) {todo en cero};
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item \texttt{glmnet} ajusta el \textbf{camino completo} desde $\lambda_{\max}$ hacia abajo (unos 100 valores en escala logarítmica), usando cada solución como arranque de la siguiente. Es barato: la curva entera cuesta poco más que un OLS.
+  \item Con $k$ pliegues, cada punto trae su barra. $\lambda_{\min}$ minimiza; $\lambda_{1SE}$ es el modelo más simple estadísticamente indistinguible del mejor. Para reportar un modelo esparso, la regla 1-SE es la costumbre.
+  \item A la izquierda, con $\lambda \to 0$, la curva sube: es OLS sobreajustando. A la derecha, todo en cero: el modelo predice la media.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Leer un camino de regularización}
+\small
+La otra salida de \texttt{glmnet}: los coeficientes como función de $\lambda$.
+\begin{center}
+\begin{tikzpicture}[scale=0.62]
+  \draw[->] (0,-1.6) -- (0,2.7) node[above, font=\scriptsize] {$\hat{\beta}_j$};
+  \draw[->] (0,0) -- (7.6,0);
+  \node[font=\scriptsize] at (3.8,-1.9) {$\lambda$ decrece $\rightarrow$ (modelo más complejo)};
+  \draw[blue, very thick] plot[smooth] coordinates {(1.0,0) (2.5,0.7) (4.0,1.3) (5.5,1.8) (7.0,2.2)};
+  \draw[red, very thick] plot[smooth] coordinates {(2.4,0) (3.5,0.5) (5.0,1.0) (7.0,1.5)};
+  \draw[teal, very thick] plot[smooth] coordinates {(3.6,0) (4.6,-0.4) (5.8,-0.8) (7.0,-1.1)};
+  \draw[orange, very thick] plot[smooth] coordinates {(5.2,0) (6.1,0.3) (7.0,0.6)};
+  \draw[dashed, gray, thick] (3.0,-1.4) -- (3.0,2.4);
+  \node[font=\scriptsize, gray] at (3.0,2.62) {$\lambda_{1SE}$};
+  \node[font=\scriptsize, blue] at (7.35,2.2) {área};
+  \node[font=\scriptsize, red] at (7.55,1.5) {estrato};
+  \node[font=\scriptsize, teal] at (7.7,-1.1) {distancia};
+  \node[font=\scriptsize, orange] at (7.45,0.6) {baños};
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item De izquierda ($\lambda$ grande: todo en cero) a derecha ($\lambda \to 0$: OLS). Cada línea es un coeficiente; el punto donde se despega del cero es su \textbf{entrada}.
+  \item \textbf{El orden de entrada informa:} lo que entra primero es lo que más poder predictivo aporta \emph{dado lo que ya está}. En $\lambda_{1SE}$ el modelo usa dos variables: eso es lo que se reporta. (El camino de Ridge es parecido, pero nadie toca el cero.)
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Ridge o Lasso? Depende de cómo sea el mundo}
+\small
+\begin{itemize}\itemsep5pt
+  \item \textbf{Mundo esparso} (pocos coeficientes grandes, el resto $\approx 0$): gana el \textbf{Lasso}, que recorta el ruido a cero y concentra la estimación donde hay señal. \pause
+  \item \textbf{Mundo denso} (muchos efectos pequeños repartidos): gana \textbf{Ridge}; anular variables tira señal a la basura. \\ \textcolor{gray}{Ejemplo: predecir precios con cientos de microatributos que aportan poquito cada uno.} \pause
+  \item \textbf{Predictores muy correlacionados:} el Lasso tiende a elegir \textbf{uno} del grupo, casi al azar, y anular los demás $\Rightarrow$ el conjunto seleccionado es \textbf{inestable} entre muestras. Localidad, distancia al centro y estrato se pisan entre sí: cuál sobrevive depende de la muestra. \pause
+\end{itemize}
+\vspace{0.1cm}
+\begin{block}{En la práctica}
+Nadie lo sabe \emph{a priori}: se prueban ambos (y Elastic Net) sobre los \textbf{mismos pliegues}, y decide el CV. Y si el Lasso gana, cuidado con sobreinterpretar ``las variables elegidas'': esa es la segunda mitad de la sesión.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Elastic Net: la negociación}
+\small
+\textbf{Problema} (Zou \& Hastie, 2005), en la parametrización de \texttt{glmnet}:
+\[ \hat{\beta}^{EN} = \argmin_{\beta} \; \frac{1}{2n}\sum_{i=1}^n \big(y_i - x_i'\beta\big)^2 + \lambda \left[ \alpha \sum_j |\beta_j| + \frac{1-\alpha}{2} \sum_j \beta_j^2 \right] \]
+\pause
+\begin{itemize}\itemsep4pt
+  \item $\alpha \in [0,1]$ interpola: $\alpha = 1$ es Lasso puro; $\alpha = 0$, Ridge puro.
+  \item Hereda del L1 la \textbf{selección} (ceros exactos) y del L2 la \textbf{estabilidad} con correlación: predictores muy correlacionados tienden a entrar o salir \textbf{juntos}, con coeficientes parecidos (\emph{grouping effect}), en vez del sorteo del Lasso. \pause
+  \item Dos hiperparámetros, $(\lambda, \alpha)$: CV sobre una grilla de ambos, o fijar $\alpha \in \{0{,}5, 1\}$ y CV sobre $\lambda$. Y todo esto vale igual para la logística: \texttt{glmnet} con familia \texttt{binomial} es la logística penalizada de la sesión 3.
+\end{itemize}
+\pause
+\begin{block}{Regla mental}
+Ridge $=$ estabilidad; Lasso $=$ esparsidad; Elastic Net $=$ negociación entre las dos, con $\alpha$ como término del acuerdo.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 3: COMPRIMIR
+%%#################################################
+%%#################################################
+\section{Comprimir: PCR, PLS y la intuición de PCA}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{PCA en una diapositiva: las direcciones que concentran la varianza}
+\small
+\begin{columns}[T]
+\begin{column}{0.42\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.5]
+  \draw[->] (-2.6,0) -- (2.9,0) node[right, font=\scriptsize] {$x_1$};
+  \draw[->] (0,-1.7) -- (0,2.2) node[above, font=\scriptsize] {$x_2$};
+  \foreach \px/\py in {-1.8/-0.9, -1.4/-0.5, -1.1/-0.8, -0.7/-0.2, -0.4/-0.5, 0/0.1, -0.1/-0.3, 0.4/0.4, 0.7/0.1, 1.0/0.7, 1.3/0.4, 1.7/1.0, 1.9/0.7, 0.2/0.5} \fill[gray] (\px,\py) circle (2pt);
+  \draw[-{Stealth}, very thick, blue] (0,0) -- (2.2,1.27);
+  \node[font=\scriptsize, blue] at (2.55,1.55) {PC1};
+  \draw[-{Stealth}, very thick, red] (0,0) -- (-0.55,0.95);
+  \node[font=\scriptsize, red] at (-0.95,1.25) {PC2};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.58\textwidth}
+\vspace{0.05cm}
+Con $p$ variables correlacionadas, la información \emph{efectiva} vive en menos dimensiones. PCA busca las \textbf{combinaciones lineales} de máxima varianza:
+\begin{itemize}\itemsep3pt
+  \item \textbf{PC1:} la dirección $w$ ($\|w\| = 1$) que maximiza $\Var(w'x)$; \textbf{PC2:} la de máxima varianza \emph{ortogonal} a PC1; etc.
+  \item Cada componente explica una fracción de la varianza; las primeras $M \ll p$ suelen explicar casi toda.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Aseo:} centrar siempre; estandarizar casi siempre (si no, la variable de mayor varianza se roba el PC1). Los componentes son autovectores de la covarianza (apéndice); en R, \texttt{prcomp()} o \texttt{step\_pca()}.
+  \item \textbf{Leer un componente:} sus \emph{cargas} dicen qué variables lo forman. El PC1 de los activos de un hogar es el índice de riqueza de Filmer \& Pritchett (2001); vuelve en la sesión 9.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{PCR y PLS: comprimir antes de predecir (ISL, sección 6.3)}
+\small
+\textbf{Regresión sobre componentes principales (PCR):} calcular los $M$ primeros componentes de $\mathbf{X}$ y hacer OLS de $y$ sobre ellos. $M$ es la perilla; se elige por CV.
+\pause
+\begin{itemize}\itemsep3pt
+  \item Es prima hermana de Ridge: ambas encogen las direcciones de poca varianza de $\mathbf{X}$; PCR las \emph{corta}, Ridge las \emph{amortigua}. \pause
+  \item \textbf{Su límite:} elige las direcciones \textbf{sin mirar $y$}. Si la dirección que predice $y$ tiene poca varianza en $\mathbf{X}$, PCR la descarta. \pause
+  \item \textbf{PLS} construye los componentes \emph{usando $y$} (pondera los predictores por su covarianza con $y$); en la práctica rara vez gana mucho a PCR o a Ridge (ISL 6.3.2). \pause
+  \item Ninguna de las dos \textbf{selecciona} variables: cada componente mezcla las $p$ originales. Se pierde la lectura por variable; se gana estabilidad con predictores muy correlacionados.
+\end{itemize}
+\pause
+\begin{block}{Cuándo comprimir}
+Cientos de variables muy correlacionadas (píxeles, bandas satelitales, ítems de encuesta, indicadores macro): comprimir antes de predecir es más estable que seleccionar.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 4: LO QUE LA SELECCIÓN NO DICE
+%%#################################################
+%%#################################################
+\section{Alta dimensión: lo que la selección dice y lo que no}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{\emph{Sparsity}: el supuesto que salva el día}
+\small
+Si \textbf{todos} los $p$ coeficientes importaran, con $p > n$ el problema sería imposible: más incógnitas que ecuaciones.
+\pause
+\vspace{0.1cm}
+\textbf{El supuesto:} $\beta^{0}$ es \textbf{esparso}: solo $s \ll n$ de sus $p$ componentes son distintos de cero (o aproximadamente: pocos grandes, el resto despreciables).
+\pause
+\begin{itemize}\itemsep4pt
+  \item Con \emph{sparsity}, los grados de libertad ``verdaderos'' son $\sim s$, no $p$: hay esperanza si $n \gg s$, \textbf{aunque} $p \gg n$.
+  \item El problema se vuelve de \textbf{búsqueda}: ¿cuáles son las $s$ variables? La búsqueda exacta cuesta $2^p$; el Lasso la vuelve convexa y la resuelve en segundos. \pause
+  \item \textbf{¿Es creíble en economía?} A menudo sí como aproximación; pero es un supuesto, y hay mundos densos (los precios de activos de Gu, Kelly \& Xiu, 2020) donde encoger gana a seleccionar.
+\end{itemize}
+\pause
+\begin{block}{Lo que la teoría garantiza (informal; el enunciado, en el apéndice)}
+Con $\lambda$ del orden de $\sigma\sqrt{\log(p)/n}$, el error de \textbf{predicción} del Lasso es como el de OLS sobre las $s$ variables correctas, pagando solo un factor $\log p$ por no saber cuáles son. Con $p = 10^6$, $\log p \approx 14$.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Dos preguntas que suenan igual y no lo son}
+\small
+Supongamos que el mundo es $\mathbf{y} = \mathbf{X}\beta^0 + \varepsilon$ con $\beta^0$ esparso, de soporte $S$.
+\begin{enumerate}\itemsep5pt
+  \item \textbf{¿Predice bien?} ¿Es pequeño el error fuera de muestra de $\mathbf{X}\hat{\beta}$? \pause
+  \item \textbf{¿Selecciona bien?} ¿Recupera el soporte: $\{j : \hat{\beta}_j \neq 0\} = S$? \pause
+\end{enumerate}
+\vspace{0.1cm}
+\begin{itemize}\itemsep4pt
+  \item La (2) es \textbf{mucho} más exigente que la (1): se puede predecir de maravilla con las variables ``equivocadas'' (proxies correlacionados).
+  \item Para (1) basta \emph{sparsity} y un diseño no degenerado. Para (2) hacen falta, además, señales no minúsculas ($|\beta^0_j|$ por encima del ruido para todo $j \in S$) y la \textbf{condición de irrepresentabilidad}: que ningún predictor irrelevante sea demasiado bien explicado por los relevantes. Es fuerte y, lo incómodo, \textbf{no verificable}: depende del soporte que no conocemos. \pause
+  \item Si falla, el Lasso incluye proxies equivocados \emph{sin importar cuántos datos haya}. No es un problema de $n$; es estructural.
+\end{itemize}
+\pause
+\begin{block}{Y son relevantes para usos distintos}
+Para \textbf{predecir}, basta (1). Para \textbf{interpretar} qué variables importan, o para elegir \emph{controles}, quisiéramos (2), y casi nunca la tenemos.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El modo de falla típico: el proxy correlacionado}
+\small
+\begin{center}
+\begin{tikzpicture}[
+    every node/.style={circle, draw, minimum size=0.7cm, font=\scriptsize},
+    arrow/.style={-{Stealth[length=2.5mm]}, thick}
+]
+  \node (X1) {$X_1$};
+  \node (X2) [right=2.0cm of X1] {$X_2$};
+  \node (Y) [below right=0.55cm and 0.4cm of X1] {$Y$};
+  \draw[arrow, blue, thick] (X1) -- node[draw=none, circle, left, font=\scriptsize\color{blue}]{$\beta_1 \neq 0$} (Y);
+  \draw[{Stealth[length=2.5mm]}-{Stealth[length=2.5mm]}, dashed, red, thick] (X1) -- node[draw=none, circle, above, font=\scriptsize\color{red}]{$\rho = 0{,}95$} (X2);
+\end{tikzpicture}
+\end{center}
+\begin{itemize}\itemsep3pt
+  \item $X_1$ es la variable verdadera; $X_2$ es un proxy muy correlacionado que \textbf{no} afecta a $Y$. Para el Lasso ambos predicen casi igual: con ruido de por medio puede quedarse con $X_2$, repartir, o alternar entre muestras. \pause
+  \item Para \textbf{predecir}, da lo mismo. Para \textbf{interpretar}, es un desastre silencioso: el modelo reporta con confianza la variable equivocada. En la vivienda: ¿sobrevive la distancia al centro o la \emph{dummy} de localidad? Depende de la muestra.
+\end{itemize}
+\pause
+\begin{block}{La frase para tatuarse}
+El Lasso selecciona \textbf{predictores}, no \textbf{causas}. Y el \emph{stepwise} hereda el mismo problema sin ninguna de las garantías.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Anticipo de la sesión 9: si lo que quieren es un $\beta$, seleccionen dos veces}
+\small
+\begin{columns}[T]
+\begin{column}{0.4\textwidth}
+\begin{center}
+\begin{tikzpicture}[
+    every node/.style={circle, draw, minimum size=0.85cm, font=\scriptsize},
+    arrow/.style={-{Stealth[length=2.5mm]}, thick}
+]
+  \node (Z) {$x_k$};
+  \node (D) [below left=1.0cm and 1.3cm of Z] {$d$};
+  \node (Y) [below right=1.0cm and 1.3cm of Z] {$y$};
+  \draw[arrow, red] (Z) -- node[draw=none, circle, left, font=\scriptsize\color{red}]{fuerte} (D);
+  \draw[arrow, red] (Z) -- node[draw=none, circle, right, font=\scriptsize\color{red}]{débil} (Y);
+  \draw[arrow, blue, thick] (D) -- node[draw=none, circle, below, font=\scriptsize\color{blue}]{$\alpha$} (Y);
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.6\textwidth}
+\vspace{0.05cm}
+\textbf{Setup:} el efecto $\alpha$ de un tratamiento $d$ sobre $y$, controlando flexiblemente por cientos de $x$. \textbf{La tentación:} Lasso de $y$ sobre $(d, x)$ para elegir controles, y OLS con los elegidos.
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{El fallo:} el Lasso elige por capacidad de predecir $y$. Un confusor con efecto \emph{débil} sobre $y$ pero \emph{fuerte} sobre $d$ es descartado, y su omisión sesga $\hat{\alpha}$: el sesgo de variable omitida, resucitado por un algoritmo.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.05cm}
+\begin{block}{\emph{Post-double-selection} (Belloni, Chernozhukov \& Hansen, 2014)}
+Lasso de $y$ sobre $x$ \textbf{y} Lasso de $d$ sobre $x$; OLS de $y$ sobre $d$ y la \textbf{unión} de los controles seleccionados. Para sesgar $\hat{\alpha}$ una variable omitida debe correlacionar con $y$ \emph{y} con $d$; la doble selección solo omite las débiles en ambas, y el sesgo residual es de segundo orden. Los intervalos usuales vuelven a ser válidos. Los detalles y el \emph{double machine learning}, en la sesión 9.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 5: APLICACIÓN GUIADA
+%%#################################################
+%%#################################################
+\section{Aplicación guiada: vivienda con muchas covariables}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Los datos y la pregunta}
+\small
+\textbf{Datos:} los anuncios de vivienda de Bogotá de la sesión 2, pero ahora con \textbf{todo} lo que podemos construir: las variables base, \emph{dummies} de localidad y tipo, interacciones de a pares, polinomios y \emph{splines} de área y distancias. Unos cientos de columnas para unos miles de anuncios.
+\pause
+\vspace{0.1cm}
+\textbf{Preguntas:}
+\begin{enumerate}\itemsep3pt
+  \item ¿Cuánto mejora (o empeora) OLS con todas las columnas frente al OLS flexible ``a mano'' de la sesión 2?
+  \item ¿Ridge, Lasso o Elastic Net? ¿Con qué $\lambda$? ¿Le ganan al OLS flexible en la prueba?
+  \item ¿Qué variables sobreviven al Lasso, y qué tan estables son entre remuestras?
+\end{enumerate}
+\pause
+\vspace{0.1cm}
+\textbf{Decisiones antes de ajustar nada:}
+\begin{itemize}\itemsep2pt
+  \item $y = \log(\text{precio})$; la misma partición 80/20 de la sesión 2.
+  \item CV de 10 pliegues sobre los \textbf{mismos pliegues} para todos; grilla de 100 valores de $\lambda$ y $\alpha \in \{0, 0{,}5, 1\}$; regla 1-SE.
+  \item La receta (\emph{dummies}, interacciones, \emph{splines}, estandarización) vive dentro del \emph{pipeline}.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cinco modelos, una misma prueba}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{llcccc}
+\hline
+ & Modelo & Coef.\ $\neq 0$ & RMSE (log) & MAE (pesos) & $R^2$ prueba \\
+\hline
+1 & OLS flexible de la sesión 2 & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+2 & OLS con todas las columnas & $p$ & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+3 & Ridge, $\lambda_{1SE}$ & $p$ & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+4 & Lasso, $\lambda_{1SE}$ & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+5 & Elastic Net, $\alpha = 0{,}5$ & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\textbf{Un ancla publicada.} Mullainathan \& Spiess (2017, Tabla 1): precios de vivienda de la \emph{American Housing Survey}, 10.000 unidades de entrenamiento y 150 variables. $R^2$ en la prueba: OLS 41,7\%; Lasso 46,0\%; bosque aleatorio 45,5\%; ensamble 45,7\%. Y la ganancia varía a lo largo de la distribución de precios.
+\pause
+\vspace{0.05cm}
+\textbf{Preguntas que la tabla debe responder:}
+\begin{itemize}\itemsep2pt
+  \item ¿La fila 2 pierde contra la 1? Si sí, están viendo la varianza de OLS con muchos parámetros en vivo.
+  \item ¿Cuánto recupera la penalización (filas 3--5 contra la 2)? ¿Y le gana a la especificación a mano (fila 1)? Cuatro puntos de $R^2$, como en Mullainathan \& Spiess, es una ganancia típica.
+  \item ¿Con cuántas variables lo logra el Lasso? Ese número es el precio de la interpretabilidad.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Las figuras: la curva, el camino y quién sobrevive}
+\small
+\begin{enumerate}\itemsep4pt
+  \item \textbf{La curva de CV de $\lambda$} para $\alpha \in \{0, 0{,}5, 1\}$, en los mismos ejes. Marcar $\lambda_{\min}$ y $\lambda_{1SE}$; anotar cuántos coeficientes quedan en cada uno. Si la curva es plana en un rango amplio, el dato es que \emph{muchas} especificaciones predicen igual. \pause
+  \item \textbf{El camino de coeficientes} del Lasso con las diez primeras entradas etiquetadas. Esperamos área y estrato temprano; después, localidades y distancias, que se pisan entre sí. \pause
+  \item \textbf{Estabilidad de la selección:} repetir el Lasso en 100 remuestras \emph{bootstrap} del entrenamiento y contar en qué fracción sobrevive cada variable. Las que sobreviven en el 95\% son señal; las que entran en el 40\% son el sorteo del proxy correlacionado. \pause
+  \item Y, como siempre, \textbf{predicho vs.\ observado} y \textbf{error por decil} del mejor modelo, contra el OLS flexible de la sesión 2.
+\end{enumerate}
+\pause
+\begin{block}{El reporte}
+La tabla en la misma prueba $+$ la curva de CV $+$ el camino $+$ la tabla de estabilidad. Quien lea ``el Lasso eligió la distancia al centro'' sin la tabla de estabilidad está leyendo ruido con nombre propio.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}[fragile]{Cómo se ve en R (\texttt{glmnet} dentro de \texttt{tidymodels})}
+\scriptsize
+\begin{verbatim}
+library(tidymodels); set.seed(2026)
+rec <- recipe(log_precio ~ ., data = train) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_interact(~ area:starts_with("estrato")) |>
+  step_ns(area, dist_centro, deg_free = 4) |>
+  step_normalize(all_numeric_predictors())   # dentro del pliegue
+enet  <- linear_reg(penalty = tune(), mixture = tune()) |>
+  set_engine("glmnet")                        # mixture: 0 Ridge, 1 Lasso
+wf    <- workflow(rec, enet)
+folds <- vfold_cv(train, v = 10, strata = log_precio)
+grid  <- grid_regular(penalty(range = c(-4, 0)),
+  mixture(values = c(0, 0.5, 1)), levels = c(50, 3))
+res   <- tune_grid(wf, folds, grid = grid, metrics = metric_set(rmse))
+autoplot(res)                                 # curvas de CV
+best  <- select_by_one_std_err(res, desc(penalty),
+                               metric = "rmse")
+final <- finalize_workflow(wf, best) |> last_fit(split)   # una vez
+tidy(extract_fit_parsnip(final)) |> filter(estimate != 0)
+\end{verbatim}
+\normalsize
+\small
+\begin{itemize}\itemsep2pt
+  \item \texttt{penalty} es $\lambda$ y \texttt{mixture} es $\alpha$; \texttt{glmnet} ajusta el camino completo por cada $\alpha$ y \texttt{tune\_grid} lo evalúa en los pliegues. La última línea lista los coeficientes que sobreviven, en la escala original.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Presentación estudiantil: el paper de la sesión 4}
+\framesubtitle{Quince minutos, tres preguntas}
+\small
+Deppner \& Cajias (2024) o Goulet Coulombe et al.\ (2022), a elección de quien presenta.
+\begin{enumerate}\itemsep5pt
+  \item \textbf{¿Qué se predice y por qué importa el protocolo?} Precios o rentas de vivienda con dependencia espacial; variables macro con dependencia temporal.
+  \item \textbf{¿Con qué datos y método, y cómo se evalúa?} Qué esquema de validación usan, contra cuál lo comparan, y qué métrica reportan.
+  \item \textbf{¿Qué se encuentra y cómo se interpreta?} Cuánto cambia el error estimado (o el modelo elegido) al cambiar el esquema; qué recomiendan.
+\end{enumerate}
+\pause
+\vspace{0.15cm}
+\begin{block}{Para el resto de la sala}
+Mientras escuchan, anoten: ¿el CV que reportan responde la pregunta que el paper quiere responder? ¿Qué pasaría con sus conclusiones si el remuestreo hubiera sido aleatorio? Es la sesión pasada aplicada a un paper, y la de hoy: en Goulet Coulombe et al., la regularización es uno de los cuatro ingredientes que comparan.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 6: INTERPRETACIÓN Y CIERRE
+%%#################################################
+%%#################################################
+\section{Interpretación y cierre}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Qué dice el modelo y qué no dice}
+\small
+\begin{itemize}\itemsep3pt
+  \item \textbf{Los coeficientes están encogidos:} un $\hat{\beta}^L_j$ no es un efecto marginal; está sesgado hacia cero a propósito. Si se quiere la magnitud, se reajusta OLS sobre las variables que sobrevivieron (\emph{post-Lasso}), sabiendo que el error estándar de ese OLS \textbf{finge} que el modelo estaba decidido antes de ver los datos. \pause
+  \item \textbf{Sobrevivir no es importar:} lo que sobrevive es lo que predice \emph{dado lo demás}. Con proxies correlacionados el sorteo cambia entre remuestras; la tabla de estabilidad es el mínimo honesto. \pause
+  \item \textbf{Lo que sí se puede decir:} cuánta capacidad predictiva hay en la información ($R^2$ de prueba), cuántas variables hacen falta para capturarla, y qué \emph{bloques} de información aportan: la jerarquía de Gelvez et al.\ (2026), que veremos en la sesión 7. \pause
+\end{itemize}
+\begin{block}{$Y$, no $\beta$, versión regularización}
+La penalización es información previa sobre el mundo (efectos pequeños, o pocos; la lectura bayesiana, en el apéndice) y sirve para predecir mejor. Para decir que una variable \emph{causa} algo hace falta un diseño de identificación (sesión 9).
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cuándo usar qué, y qué leer}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lp{4.3cm}p{4.2cm}}
+\hline
+ & Usar cuando & Cuidado con \\
+\hline
+OLS & $p \ll n$ y especificación defendible & con $p$ cerca de $n$, la varianza \\
+Ridge & mundo denso; predictores correlacionados & no selecciona; hay que estandarizar \\
+Lasso & mundo esparso; se quiere un modelo legible & selección inestable con correlación; coeficientes sesgados \\
+Elastic Net & grupos de predictores correlacionados & dos hiperparámetros por CV \\
+PCR / PLS & cientos de variables muy correlacionadas & se pierde la lectura por variable \\
+\emph{Stepwise} & casi nunca & \emph{greedy}, inestable, sin garantías \\
+Criterios (AIC, BIC) & referencia rápida en modelos lineales & $d$ no existe para bosques y redes \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\vspace{0.1cm}
+\textbf{Qué leer:} ISL cap.\ 6 (secs.\ 6.1--6.4, con las figuras de clase); Mullainathan \& Spiess (2017) por la tabla de vivienda y la discusión de qué variables ``elige'' cada remuestra; Belloni, Chernozhukov \& Hansen (2014, JEP) como puente amable hacia la sesión 9; Friedman, Hastie \& Tibshirani (2010) si quieren saber qué hace \texttt{glmnet} por dentro.
+\end{frame}
+
+%%=================================================
+\begin{frame}{Recap}
+\small
+\begin{enumerate}\itemsep6pt
+  \item \textbf{Muchos predictores} $=$ poca información por parámetro: la varianza de OLS explota en las direcciones colineales y con $p > n$ el ajuste perfecto no informa nada. Tres salidas: seleccionar, encoger, comprimir.
+  \item \textbf{Ridge} $= (\mathbf{X}'\mathbf{X} + \lambda\mathbf{I})^{-1}\mathbf{X}'\mathbf{y}$: estabiliza, encoge proporcionalmente, nunca anula. \textbf{Lasso}: el valor absoluto produce \textbf{ceros exactos} (el diamante, el umbral suave). \textbf{Elastic Net}: la negociación. Todo con predictores estandarizados dentro del pliegue.
+  \item \textbf{$\lambda$ se elige por CV:} la curva con sus barras, el mínimo o la regla 1-SE; el camino de coeficientes dice quién entra y cuándo.
+  \item \textbf{PCR y PLS} comprimen antes de predecir: estables con variables muy correlacionadas, pero sin lectura por variable. PCA vuelve en la sesión 9.
+  \item \textbf{Predecir bien es fácil; seleccionar bien es casi imposible:} el Lasso selecciona \emph{predictores}, no \emph{causas}. Si lo que quieren es un $\beta$, doble selección (sesión 9).
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}
+\vspace{2.0cm}
+\Large{Preparación para la próxima clase\ldots}
+\end{frame}
+
+%%#################################################
+%%#################################################
+%% PARTE 7: PRÓXIMA CLASE
+%%#################################################
+%%#################################################
+
+%%=================================================
+\begin{frame}{Para aprovechar al máximo la próxima sesión}
+\small
+\textbf{Lecturas obligatorias de esta semana:}
+\begin{itemize}\itemsep4pt
+  \item ISL, cap.\ 6 (secs.\ 6.1--6.4). \\ \textcolor{gray}{Guía: la 6.2 es la de clase (figuras 6.4 a 6.10); la 6.4 es la discusión de alta dimensión.}
+  \item Belloni, Chernozhukov \& Hansen (2014), \emph{High-Dimensional Methods and Inference on Structural and Treatment Effects}, JEP. \\ \textcolor{gray}{Guía: la versión amable de la doble selección; secciones 1--3 bastan por ahora.}
+\end{itemize}
+\textbf{Para la presentación estudiantil de la sesión 6:} Gu, Kelly \& Xiu (2020), \emph{Empirical Asset Pricing via Machine Learning}, RFS, o Blumenstock, Cadamuro \& On (2015), \emph{Predicting Poverty and Wealth from Mobile Phone Metadata}, \emph{Science}.
+\pause
+\vspace{0.1cm}
+\textbf{Próxima sesión --- árboles, bosques y \emph{boosting}:} dejamos los modelos lineales. Un árbol parte el espacio de las $x$ en rectángulos; un bosque promedia cientos de árboles sobre remuestras \emph{bootstrap} (el 63\% de la sesión 4) y el \emph{boosting} ajusta árboles a los residuos. Son los métodos que suelen ganar con datos tabulares, y con ellos replicamos el núcleo de Gelvez et al.\ (2026). Lectura previa: ISL cap.\ 8.
+\pause
+\vspace{0.1cm}
+\textbf{Aplicación de esta semana en R:} vivienda con muchas covariables en \texttt{glmnet}: la tabla de cinco modelos, la curva de CV, el camino y la tabla de estabilidad.
+\end{frame}
+
+%%=================================================
+%% Referencias
+\begin{frame}{Referencias esenciales}
+\scriptsize
+\begin{itemize}\itemsep1pt
+  \item James, G., Witten, D., Hastie, T., \& Tibshirani, R. (2021). \emph{An Introduction to Statistical Learning} (2.\ ed.). Springer. Cap.\ 6. [ISL]
+  \item Hoerl, A., \& Kennard, R. (1970). Ridge Regression: Biased Estimation for Nonorthogonal Problems. \emph{Technometrics}, 12(1), 55--67.
+  \item Tibshirani, R. (1996). Regression Shrinkage and Selection via the Lasso. \emph{JRSS-B}, 58(1), 267--288.
+  \item Zou, H., \& Hastie, T. (2005). Regularization and Variable Selection via the Elastic Net. \emph{JRSS-B}, 67(2), 301--320.
+  \item Friedman, J., Hastie, T., \& Tibshirani, R. (2010). Regularization Paths for Generalized Linear Models via Coordinate Descent. \emph{Journal of Statistical Software}, 33(1). [\texttt{glmnet}]
+  \item Mullainathan, S., \& Spiess, J. (2017). Machine Learning: An Applied Econometric Approach. \emph{Journal of Economic Perspectives}, 31(2), 87--106.
+  \item Belloni, A., Chernozhukov, V., \& Hansen, C. (2014). High-Dimensional Methods and Inference on Structural and Treatment Effects. \emph{Journal of Economic Perspectives}, 28(2), 29--50.
+  \item Gu, S., Kelly, B., \& Xiu, D. (2020). Empirical Asset Pricing via Machine Learning. \emph{Review of Financial Studies}, 33(5), 2223--2273.
+  \item Blumenstock, J., Cadamuro, G., \& On, R. (2015). Predicting Poverty and Wealth from Mobile Phone Metadata. \emph{Science}, 350(6264), 1073--1076.
+  \item Filmer, D., \& Pritchett, L. (2001). Estimating Wealth Effects Without Expenditure Data --- or Tears. \emph{Demography}, 38(1), 115--132.
+  \item Hastie, T., Tibshirani, R., \& Wainwright, M. (2015). \emph{Statistical Learning with Sparsity}. CRC Press. [para profundizar]
+\end{itemize}
+\normalsize
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% APÉNDICE: PARA PROFUNDIZAR
+%%#################################################
+%%#################################################
+\appendix
+\section{Apéndice: para profundizar}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{A1. Ridge: la solución cerrada y la magia de $\lambda\mathbf{I}$}
+\small
+\textbf{1. La función objetivo:} $S(\beta) = (\mathbf{y} - \mathbf{X}\beta)'(\mathbf{y} - \mathbf{X}\beta) + \lambda\,\beta'\beta = \mathbf{y}'\mathbf{y} - 2\beta'\mathbf{X}'\mathbf{y} + \beta'(\mathbf{X}'\mathbf{X})\beta + \lambda\,\beta'\beta$.
+\pause
+\textbf{2. Derivamos e igualamos a cero:} $-2\mathbf{X}'\mathbf{y} + 2\mathbf{X}'\mathbf{X}\beta + 2\lambda\beta = 0 \;\Rightarrow\; (\mathbf{X}'\mathbf{X} + \lambda\mathbf{I})\beta = \mathbf{X}'\mathbf{y}$.
+\pause
+\textbf{3. Solución:}
+\[ \hat{\beta}^{R} \;=\; (\mathbf{X}'\mathbf{X} + \lambda \mathbf{I})^{-1}\,\mathbf{X}'\mathbf{y}. \]
+\pause
+\textbf{4. Por qué la inversa siempre existe:} si $d_1 \geq \cdots \geq d_p \geq 0$ son los autovalores de $\mathbf{X}'\mathbf{X}$, los de $\mathbf{X}'\mathbf{X} + \lambda\mathbf{I}$ son $d_j + \lambda > 0$ para todo $\lambda > 0$, incluso con $p > n$. En la base de autovectores, Ridge multiplica la coordenada $j$ de OLS por $d_j / (d_j + \lambda)$: casi 1 donde hay mucha varianza, casi 0 en las direcciones enfermas.
+\pause
+\textbf{5. Caso ortonormal} ($\mathbf{X}'\mathbf{X} = \mathbf{I}$): $\hat{\beta}^{R}_j = \hat{\beta}^{OLS}_j / (1 + \lambda)$, encogimiento proporcional.
+\pause
+\begin{block}{Sesgo y varianza}
+$\E[\hat{\beta}^R] = (\mathbf{X}'\mathbf{X} + \lambda\mathbf{I})^{-1}\mathbf{X}'\mathbf{X}\,\beta \neq \beta$: sesgado hacia cero. $\Var(\hat{\beta}^R) = \sigma^2 (\mathbf{X}'\mathbf{X} + \lambda\mathbf{I})^{-1}\mathbf{X}'\mathbf{X}(\mathbf{X}'\mathbf{X} + \lambda\mathbf{I})^{-1}$, menor que la de OLS en cada dirección. Existe $\lambda > 0$ que reduce el MSE (Hoerl \& Kennard, 1970).
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A2. Las condiciones de optimalidad del Lasso}
+\small
+\textbf{1. El obstáculo:} $|\beta_j|$ no es diferenciable en cero, que es justo donde ocurre lo interesante. Se generaliza la derivada: $g$ es un \textbf{subgradiente} de una función convexa $f$ en $x_0$ si $f(x) \geq f(x_0) + g\,(x - x_0)$ para todo $x$. Para el valor absoluto,
+\[ \partial |\beta_j| = \begin{cases} \{\sign(\beta_j)\} & \beta_j \neq 0 \\ [-1, 1] & \beta_j = 0 \end{cases}, \qquad \text{y } \hat{\beta} \text{ minimiza } f \text{ convexa} \iff 0 \in \partial f(\hat{\beta}). \]
+\pause
+\textbf{2. Aplicado a} $\tfrac{1}{2}\|\mathbf{y} - \mathbf{X}\beta\|^2 + \lambda\|\beta\|_1$: el primer término tiene gradiente $-\mathbf{X}'(\mathbf{y} - \mathbf{X}\beta)$; el segundo aporta el subgradiente. Componente a componente:
+\[ \boxed{\; \hat{\beta}_j \neq 0: \;\; \mathbf{x}_j'(\mathbf{y} - \mathbf{X}\hat{\beta}) = \lambda\,\sign(\hat{\beta}_j); \qquad \hat{\beta}_j = 0: \;\; \big|\mathbf{x}_j'(\mathbf{y} - \mathbf{X}\hat{\beta})\big| \leq \lambda. \;} \]
+\pause
+\begin{itemize}\itemsep3pt
+  \item $\mathbf{x}_j'(\mathbf{y} - \mathbf{X}\hat{\beta})$ es la covarianza del predictor $j$ con el \textbf{residuo}. Los activos la tienen exactamente en $\pm\lambda$; los inactivos, por debajo. $\lambda$ es un \textbf{umbral de mérito}: entras solo si tu correlación con lo aún no explicado alcanza $\lambda$.
+  \item Si $\lambda \geq \max_j |\mathbf{x}_j'\mathbf{y}|$, $\hat{\beta} = 0$ cumple las condiciones: nadie entra. De ahí sale $\lambda_{\max}$.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A3. El umbral suave y el descenso por coordenadas}
+\small
+\textbf{Caso univariado} (una coordenada, $\mathbf{X}$ estandarizada): sea $z$ el estimador sin penalizar; resolvemos $\min_\beta \tfrac{1}{2}(z - \beta)^2 + \lambda|\beta|$.
+\begin{enumerate}\itemsep2pt
+  \item Si $\hat{\beta} > 0$: $\beta - z + \lambda = 0 \Rightarrow \hat{\beta} = z - \lambda$, coherente solo si $z > \lambda$.
+  \item Si $\hat{\beta} < 0$: $\beta - z - \lambda = 0 \Rightarrow \hat{\beta} = z + \lambda$, coherente solo si $z < -\lambda$.
+  \item Si $\hat{\beta} = 0$: se necesita $0 \in \{-z + \lambda s : s \in [-1,1]\}$, es decir, $z \in [-\lambda, \lambda]$.
+\end{enumerate}
+\[ \boxed{\; \hat{\beta} = S_{\lambda}(z) = \sign(z)\,\big(|z| - \lambda\big)_{+} \;} \]
+\pause
+\textbf{Descenso por coordenadas} (Friedman, Hastie \& Tibshirani, 2010), el algoritmo de \texttt{glmnet}: con el objetivo $\tfrac{1}{2n}\|\mathbf{y}-\mathbf{X}\beta\|^2 + \lambda\|\beta\|_1$ y predictores estandarizados, inicializar $\hat{\beta} = 0$ y repetir, para $j = 1, \ldots, p$, hasta converger:
+\[ r^{(j)} = \mathbf{y} - \sum_{k \neq j} \mathbf{x}_k \hat{\beta}_k, \qquad \hat{\beta}_j \leftarrow S_{\lambda}\!\Big( \tfrac{1}{n}\, \mathbf{x}_j' r^{(j)} \Big). \]
+\pause
+\begin{itemize}\itemsep2pt
+  \item Converge al óptimo global porque el objetivo es convexo y la parte no diferenciable es separable por coordenadas. Los trucos: \emph{warm starts} a lo largo del camino de $\lambda$ y \emph{active sets} (iterar solo sobre los activos). Por eso el camino completo cuesta poco más que un OLS.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A4. La lectura bayesiana: penalizar es tener un \emph{prior}}
+\small
+Ridge y Lasso son \textbf{modas posteriores} bajo distintos \emph{priors} independientes sobre los $\beta_j$:
+\[ \text{Ridge:} \;\; \beta_j \sim N(0, \tau^2) \qquad\qquad \text{Lasso:} \;\; \beta_j \sim \mathrm{Laplace}(0, b) \]
+\begin{center}
+\begin{tikzpicture}[scale=0.6]
+  \draw[->] (-3.3,0) -- (3.3,0) node[right, font=\scriptsize] {$\beta_j$};
+  \draw[->] (0,0) -- (0,2.9);
+  \draw[blue, very thick] plot[smooth] coordinates {(-3,0.02) (-2,0.27) (-1.5,0.65) (-1,1.21) (-0.5,1.76) (0,2.0) (0.5,1.76) (1,1.21) (1.5,0.65) (2,0.27) (3,0.02)};
+  \draw[red, very thick] plot[smooth] coordinates {(-3,0.12) (-2,0.34) (-1,0.92) (-0.5,1.52) (0,2.5)};
+  \draw[red, very thick] plot[smooth] coordinates {(0,2.5) (0.5,1.52) (1,0.92) (2,0.34) (3,0.12)};
+  \node[font=\scriptsize, blue] at (2.3,0.85) {Normal (Ridge)};
+  \node[font=\scriptsize, red] at (-2.2,1.3) {Laplace (Lasso)};
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item Con $\varepsilon \sim N(0, \sigma^2)$, maximizar la posterior es minimizar $\RSS + \lambda \mathcal{P}(\beta)$ con $\lambda = \sigma^2/\tau^2$ (Ridge) o $\lambda = 2\sigma^2/b$ (Lasso).
+  \item El \emph{prior} de Laplace es \textbf{picudo en cero}: apuesta a que muchos coeficientes son exactamente nulos, y la moda posterior produce ceros. $\lambda$ traduce la fuerza de la creencia.
+  \item Mensaje: la penalización no es un truco numérico; es \textbf{información previa} sobre el mundo (``los efectos son pequeños'' o ``son pocos''). Por eso el CV, que la elige con datos, es lo que la hace honesta.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A5. PCA como problema de autovalores}
+\small
+Sea $\Sigma$ la matriz de covarianza ($p \times p$) de los datos centrados. Buscamos la dirección $w$ que maximiza la varianza de la proyección (sin la restricción, alargar $w$ la inflaría sin límite):
+\[ \max_{w} \; w'\Sigma\,w \qquad \text{sujeto a} \qquad w'w = 1. \]
+\pause
+\textbf{1. Lagrangiano:} $\mathcal{L}(w, \lambda) = w'\Sigma\,w - \lambda\,(w'w - 1)$.
+\pause
+\textbf{2. Condición de primer orden:} $2\Sigma w - 2\lambda w = 0 \;\Longrightarrow\; \boxed{\;\Sigma\,w = \lambda\,w\;}$: $w$ es un \textbf{autovector} de $\Sigma$ con autovalor $\lambda$.
+\pause
+\textbf{3. ¿Cuál autovector?} Evaluando el objetivo, $w'\Sigma w = \lambda\,w'w = \lambda$: la varianza de la proyección \textbf{es} el autovalor. PC1 es el autovector del mayor autovalor $\lambda_1$; PC2, el del segundo (ortogonal automáticamente, porque $\Sigma$ es simétrica); y así sucesivamente.
+\pause
+\vspace{0.05cm}
+\begin{itemize}\itemsep3pt
+  \item \textbf{Varianza explicada:} el componente $j$ explica $\lambda_j / \sum_k \lambda_k$ de la varianza total; el \emph{scree plot} grafica esa fracción y su codo sugiere $M$. Para PCR, $M$ se elige por CV, que sí tiene árbitro.
+  \item \textbf{Conexión con Ridge:} en la base de autovectores de $\mathbf{X}'\mathbf{X}$, PCR conserva las $M$ primeras coordenadas y descarta el resto; Ridge las multiplica por $d_j/(d_j + \lambda)$. Cortar o amortiguar: la misma idea.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A6. Lo que la teoría del Lasso garantiza (y lo que exige)}
+\small
+Sea $\mathbf{y} = \mathbf{X}\beta^0 + \varepsilon$ con $\beta^0$ esparso de soporte $S$, $|S| = s$.
+\pause
+\vspace{0.05cm}
+\textbf{Resultado 1 (predicción).} Con $\lambda \asymp \sigma\sqrt{\log(p)/n}$ y un diseño no degenerado en las direcciones esparsas (condición de \emph{autovalor restringido}),
+\[ \frac{1}{n}\,\big\|\mathbf{X}(\hat{\beta}^L - \beta^0)\big\|_2^2 \;\lesssim\; \sigma^2\,\frac{s\,\log p}{n}. \]
+Si conociéramos las $s$ variables correctas, OLS sobre ellas daría $\sigma^2 s/n$: el costo de la búsqueda es solo $\log p$. La condición es mucho más débil que pedir $\mathbf{X}'\mathbf{X}$ invertible; por eso el Lasso vive donde OLS muere.
+\pause
+\vspace{0.05cm}
+\textbf{Resultado 2 (selección).} Para recuperar el soporte con alta probabilidad hacen falta, además, (i) $\min_{j \in S}|\beta^0_j| \gtrsim \lambda$ (señales no minúsculas) y (ii) la \textbf{condición de irrepresentabilidad} (Zhao \& Yu, 2006):
+\[ \big\| \mathbf{X}_{S^c}'\mathbf{X}_S \big(\mathbf{X}_S'\mathbf{X}_S\big)^{-1} \sign(\beta^0_S) \big\|_\infty \;<\; 1, \]
+es decir, ningún predictor irrelevante puede ser demasiado bien explicado por los relevantes. Es fuerte, no verificable, y si falla el Lasso incluye proxies sin importar $n$.
+\pause
+\vspace{0.05cm}
+\textcolor{gray}{Referencias: Hastie, Tibshirani \& Wainwright (2015), caps.\ 2 y 11; Wainwright (2019), \emph{High-Dimensional Statistics}, caps.\ 7--8.}
+\end{frame}
+
+%%=================================================
+%% End document
+\end{document}

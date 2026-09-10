@@ -1,0 +1,634 @@
+\documentclass{beamer}
+
+%% Tema y configuraciones
+\usetheme{Boadilla}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=.,      % color de enlaces internos (índices, refs)
+    urlcolor=blue,    % color de URLs
+    citecolor=.,      % color de referencias bibliográficas
+}
+
+%% Helpers (macros y notación)
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\1}{\mathbb{I}}
+\newcommand{\MSE}{\mathrm{MSE}}
+\newcommand{\RSS}{\mathrm{RSS}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+%% Encabezado
+\title[BDML]{Big Data y Machine Learning \\ para Economía Aplicada}
+\subtitle{Week 04: Árboles, Random Forest y Boosting}
+\author{Eduard F. Martinez Gonzalez, Ph.D.}
+\institute[]{Departamento de Economía, Universidad Icesi}
+\date{\today}
+
+%%=================================================
+%% Begin document
+\begin{document}
+
+%%=================================================
+%% Primer slide
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%=================================================
+\begin{frame}{Previously\ldots}
+\small
+\begin{itemize}\itemsep5pt
+  \item Tres sesiones dentro del mundo \textbf{lineal}: el riesgo y el sobreajuste (S1), cómo medir el error honestamente (S2) y cómo controlar la complejidad encogiendo coeficientes con $\lambda$ (S2--S3).
+  \item Y el puente causal: el Lasso selecciona \emph{predictores}, no \emph{causas}; para inferencia, doble selección.
+\end{itemize}
+\pause
+
+\vspace{0.2cm}
+\begin{block}{Hoy: cambio total de familia}
+Salimos de los modelos lineales. \textbf{Árboles de decisión} y sus dos ensambles:
+\begin{itemize}\itemsep2pt
+  \item \textbf{Random Forest}: muchos árboles grandes \emph{en paralelo}, promediados.
+  \item \textbf{Boosting}: muchos árboles pequeños \emph{en secuencia}, sumados.
+\end{itemize}
+Son los métodos que, en la práctica, más ganan con datos tabulares --- y traen una palanca anti-varianza nueva: \textbf{promediar}.
+\end{block}
+\pause
+
+\vspace{0.1cm}
+La sesión es larga (era dos): CART $\rightarrow$ bagging/RF $\rightarrow$ boosting/XGBoost $\rightarrow$ cuál usar cuándo.
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 1: ÁRBOLES DE DECISIÓN (CART)
+%%#################################################
+%%#################################################
+\section{Árboles de decisión (CART)}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{La idea: partir el espacio en rectángulos}
+\small
+Un árbol divide el espacio de predictores con \textbf{cortes binarios sucesivos} y predice una \textbf{constante} en cada región (la media de $y$; o la clase mayoritaria).
+
+\vspace{0.2cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.66]
+% ---- Panel izquierdo: partición ----
+\draw[thick] (0,0) rectangle (4,4);
+\draw[very thick, blue] (1.6,0) -- (1.6,4);
+\draw[very thick, blue] (1.6,2.4) -- (4,2.4);
+\draw[very thick, blue] (2.9,2.4) -- (2.9,4);
+\node[font=\scriptsize] at (0.8,2.0) {$R_1$};
+\node[font=\scriptsize] at (2.8,1.2) {$R_2$};
+\node[font=\scriptsize] at (2.25,3.2) {$R_3$};
+\node[font=\scriptsize] at (3.45,3.2) {$R_4$};
+\node[font=\scriptsize] at (3.5,-0.4) {$X_1$};
+\node[font=\scriptsize] at (1.6,-0.4) {$t_1$};
+\node[font=\scriptsize] at (2.9,4.35) {$t_3$};
+\node[font=\scriptsize, rotate=90] at (-0.4,3.3) {$X_2$};
+\node[font=\scriptsize] at (4.4,2.4) {$t_2$};
+% ---- Panel derecho: árbol ----
+\begin{scope}[shift={(7.7,4.1)}, every node/.style={font=\scriptsize}]
+  \node[draw, rounded corners, fill=blue!10] (root) at (0,0) {$X_1 < t_1$};
+  \node[draw, circle] (r1) at (-1.7,-1.35) {$R_1$};
+  \node[draw, rounded corners, fill=blue!10] (n2) at (1.7,-1.35) {$X_2 < t_2$};
+  \node[draw, circle] (r2) at (0.5,-2.7) {$R_2$};
+  \node[draw, rounded corners, fill=blue!10] (n3) at (2.9,-2.7) {$X_1 < t_3$};
+  \node[draw, circle] (r3) at (1.9,-4.05) {$R_3$};
+  \node[draw, circle] (r4) at (3.9,-4.05) {$R_4$};
+  \draw[-{Stealth}] (root) -- node[left=1pt, draw=none, font=\tiny]{sí} (r1);
+  \draw[-{Stealth}] (root) -- node[right=1pt, draw=none, font=\tiny]{no} (n2);
+  \draw[-{Stealth}] (n2) -- node[left=1pt, draw=none, font=\tiny]{sí} (r2);
+  \draw[-{Stealth}] (n2) -- node[right=1pt, draw=none, font=\tiny]{no} (n3);
+  \draw[-{Stealth}] (n3) -- node[left=1pt, draw=none, font=\tiny]{sí} (r3);
+  \draw[-{Stealth}] (n3) -- node[right=1pt, draw=none, font=\tiny]{no} (r4);
+\end{scope}
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep2pt
+  \item Ambos paneles son \textbf{el mismo modelo}: cada hoja del árbol es un rectángulo del espacio.
+  \item Predicción en regresión: $\hat{y} = \bar{y}_{R_m}$ para la región donde cae $x$.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Cómo se elige cada corte?}
+\small
+\textbf{En regresión:} en cada paso, buscar el par (variable $j$, umbral $s$) que más reduce la suma de cuadrados:
+\[ \min_{j,\,s} \;\; \sum_{i:\, x_i \in R_1(j,s)} \big( y_i - \bar{y}_{R_1} \big)^2 \;+\; \sum_{i:\, x_i \in R_2(j,s)} \big( y_i - \bar{y}_{R_2} \big)^2 \]
+con $R_1(j,s) = \{x : x_j < s\}$ y $R_2(j,s) = \{x : x_j \geq s\}$.
+\pause
+
+\vspace{0.2cm}
+\begin{itemize}\itemsep5pt
+  \item La búsqueda es \textbf{exhaustiva} sobre $(j, s)$ pero barata: para cada variable basta evaluar los $n$ umbrales entre observaciones consecutivas.
+  \item El procedimiento es \textbf{greedy y recursivo} (\emph{top-down}): el mejor corte \emph{ahora}, sin mirar adelante; luego repetir dentro de cada mitad. \pause
+  \item Consecuencias del enfoque greedy: rápido y simple, pero nada garantiza el árbol globalmente óptimo (encontrarlo es NP-difícil).
+\end{itemize}
+\pause
+
+\begin{block}{Lo que el árbol hace gratis}
+No linealidades (funciones escalón) e \textbf{interacciones} (cortes anidados condicionan unos en otros) --- sin que nadie las especifique. Compárenlo con agregar términos a mano en una regresión.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Clasificación: medidas de impureza}
+\small
+Con $y$ categórica, ``reducir RSS'' se reemplaza por ``dejar los nodos más \textbf{puros}''. Para un nodo con proporción $\hat{p}$ de la clase 1 (caso binario):
+
+\vspace{0.15cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.72]
+  \draw[->] (0,0) -- (6.5,0) node[below, font=\scriptsize] {$\hat{p}$};
+  \draw[->] (0,0) -- (0,2.9);
+  \node[font=\scriptsize] at (-0.25,-0.3) {$0$};
+  \node[font=\scriptsize] at (3,-0.3) {$0.5$};
+  \node[font=\scriptsize] at (6,-0.3) {$1$};
+  % error de clasificación
+  \draw[teal, very thick] (0,0) -- (3,2.5) -- (6,0);
+  % gini
+  \draw[blue, very thick] plot[smooth] coordinates {(0,0) (0.6,0.9) (1.2,1.6) (1.8,2.1) (2.4,2.4) (3,2.5) (3.6,2.4) (4.2,2.1) (4.8,1.6) (5.4,0.9) (6,0)};
+  % entropia escalada
+  \draw[red, very thick] plot[smooth] coordinates {(0,0) (0.3,0.72) (0.6,1.18) (1.2,1.81) (1.8,2.21) (2.4,2.43) (3,2.5) (3.6,2.43) (4.2,2.21) (4.8,1.81) (5.4,1.18) (5.7,0.72) (6,0)};
+  \node[font=\scriptsize, red] at (7.6,2.35) {entropía (esc.)};
+  \node[font=\scriptsize, blue] at (7.6,1.85) {Gini};
+  \node[font=\scriptsize, teal] at (7.6,1.35) {error clasif.};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep3pt
+  \item \textbf{Error de clasificación:} $1 - \max(\hat{p}, 1-\hat{p})$. \quad \textbf{Gini:} $2\hat{p}(1-\hat{p})$. \quad \textbf{Entropía:} $-\hat{p}\log\hat{p} - (1-\hat{p})\log(1-\hat{p})$.
+  \item Para \textbf{crecer} el árbol se usan Gini o entropía: son \emph{estrictamente cóncavas} y diferenciables $\Rightarrow$ premian avances hacia nodos puros que el error (plano por tramos) ni nota.
+  \item Máxima impureza en $\hat{p} = 0.5$ (moneda al aire); cero en nodos puros.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Cuándo parar? Crecer grande y podar}
+\small
+\textbf{El dilema:} un árbol que corta hasta dejar una observación por hoja tiene error de entrenamiento cero --- la \textbf{memorización} de la sesión 1. Parar temprano con reglas locales (``no cortar si la mejora es pequeña'') es miope: un corte mediocre puede habilitar uno excelente después.
+\pause
+
+\vspace{0.2cm}
+\textbf{La solución de CART} (Breiman et al., 1984): crecer un árbol grande $T_0$ y luego \textbf{podar} resolviendo
+\[ \min_{T \subseteq T_0} \;\; \sum_{m=1}^{|T|} \sum_{i:\, x_i \in R_m} \big( y_i - \bar{y}_{R_m} \big)^2 \;+\; \alpha\, |T| \]
+donde $|T|$ es el número de hojas.
+\pause
+
+\begin{itemize}\itemsep4pt
+  \item ¿Les suena la estructura? \textbf{Ajuste $+$ castigo por complejidad}: es la misma lógica de la regularización, con $\alpha$ en el papel de $\lambda$ y ``hojas'' en el papel de ``coeficientes''.
+  \item Al variar $\alpha$ se obtiene una \textbf{secuencia anidada} de subárboles; $\alpha$ se elige por \textbf{validación cruzada}. El aparato de la sesión 2 aplica sin cambios.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El veredicto sobre el árbol solitario}
+\small
+\textbf{Lo bueno:}
+\begin{itemize}\itemsep3pt
+  \item Interpretable y graficable (se puede \emph{mostrar} a un hacedor de política).
+  \item No linealidades e interacciones automáticas; invariante a transformaciones monótonas de los predictores (¡sin estandarizar!); maneja variables mixtas y faltantes con gracia.
+\end{itemize}
+\pause
+
+\textbf{Lo malo (y es grave):}
+\begin{itemize}\itemsep3pt
+  \item Predicción \textbf{mediocre}: aproximar superficies suaves con escalones cuesta.
+  \item \textbf{Varianza altísima}: cambiar pocas observaciones puede alterar el primer corte --- y con él, \emph{todo} el árbol de ahí para abajo. Estructura inestable por construcción.
+\end{itemize}
+\pause
+
+\vspace{0.15cm}
+\begin{block}{Pregunta para la sala}
+Tenemos un método flexible, express, de bajo sesgo\ldots\ y varianza enorme. Con lo visto en el curso, ¿qué harían para bajar la varianza sin sacrificar la flexibilidad?
+\end{block}
+\pause
+\textcolor{gray}{\textbf{Promediar.} Si tuviéramos muchas muestras, entrenaríamos muchos árboles y promediaríamos sus predicciones. No tenemos muchas muestras --- pero la sesión 2 nos enseñó a fabricarlas: \textbf{bootstrap}.}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 2: BAGGING Y RANDOM FOREST
+%%#################################################
+%%#################################################
+\section{Bagging y Random Forest}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Bagging: la aritmética de promediar}
+\small
+\textbf{El punto de partida:} si $Z_1, \ldots, Z_B$ son i.i.d.\ con varianza $\sigma^2$,
+\[ \Var\big( \bar{Z} \big) \;=\; \frac{\sigma^2}{B} \]
+promediar $B$ predicciones independientes divide la varianza por $B$.
+\pause
+
+\vspace{0.2cm}
+\textbf{Bagging} (\emph{bootstrap aggregating}; Breiman, 1996):
+\begin{enumerate}\itemsep3pt
+  \item Extraer $B$ remuestras bootstrap de los datos.
+  \item Entrenar un árbol \textbf{grande, sin podar} en cada una (sesgo bajo, varianza alta --- no importa: la varianza la mata el promedio).
+  \item Predecir con el \textbf{promedio} (regresión) o el \textbf{voto mayoritario} (clasificación):
+  \[ \hat{f}_{bag}(x) \;=\; \frac{1}{B} \sum_{b=1}^{B} \hat{f}^{*b}(x) \]
+\end{enumerate}
+\pause
+
+\begin{block}{Pero hay un problema}
+Los $B$ árboles \textbf{no} son independientes: se entrenaron con remuestras de los \emph{mismos} datos. ¿Cuánto promedio nos roba esa correlación? Hagamos la cuenta.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La derivación clave: promediar bajo correlación}
+\small
+Sean $Z_1, \ldots, Z_B$ con varianza $\sigma^2$ y correlación $\rho > 0$ entre cada par (los árboles se parecen).
+\pause
+
+\textbf{1. Expandimos la varianza del promedio:}
+\[ \Var\big( \bar{Z} \big) = \frac{1}{B^2} \left[ \sum_{b=1}^{B} \Var(Z_b) + \sum_{b \neq b'} \Cov(Z_b, Z_{b'}) \right] \]
+\pause
+\textbf{2. Sustituimos ($B$ varianzas; $B(B-1)$ covarianzas $= \rho\sigma^2$):}
+\[ \Var\big( \bar{Z} \big) = \frac{1}{B^2} \Big[ B\,\sigma^2 + B(B-1)\,\rho\,\sigma^2 \Big] \]
+\pause
+\textbf{3. Reorganizamos:}
+\[ \boxed{ \; \Var\big( \bar{Z} \big) \;=\; \rho\,\sigma^2 \;+\; \frac{1-\rho}{B}\,\sigma^2 \; } \]
+\pause
+
+\begin{itemize}\itemsep3pt
+  \item Cuando $B \to \infty$, el segundo término muere\ldots\ pero queda $\rho\sigma^2$: \textbf{un piso que ningún número de árboles rompe}.
+  \item Dos lecturas: (i) aumentar $B$ \textbf{nunca sobreajusta} (solo satura); (ii) el cuello de botella no es $B$, es $\rho$. Para ganar más, hay que \textbf{descorrelacionar} los árboles.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Random Forest $=$ bagging $+$ descorrelación}
+\small
+\textbf{La idea de Breiman (2001):} en cada corte de cada árbol, sortear un subconjunto de \textbf{solo $m$ predictores} y elegir el mejor corte \emph{entre esos} ($m \approx \sqrt{p}$ en clasificación; $m \approx p/3$ en regresión).
+\pause
+
+\vspace{0.2cm}
+\textbf{¿Por qué funciona?}
+\begin{itemize}\itemsep5pt
+  \item Con bagging puro, si existe un predictor \textbf{dominante}, casi todos los árboles lo usan en el primer corte $\Rightarrow$ árboles clones $\Rightarrow$ $\rho$ alto $\Rightarrow$ el piso $\rho\sigma^2$ queda alto. \pause
+  \item Al sortear candidatos, muchos árboles \emph{ni ven} al dominante en sus primeros cortes: exploran estructuras distintas $\Rightarrow$ $\rho$ \textbf{baja} $\Rightarrow$ el piso baja.
+  \item El precio: cada árbol individual empeora un poco (más sesgo). El trade-off vuelve --- y empíricamente, bajar $\rho$ gana. \pause
+\end{itemize}
+
+\vspace{0.1cm}
+\begin{block}{Los hiperparámetros del RF}
+$B$: grande y sin miedo (500--1000; no sobreajusta). $m$: la perilla que importa (CV o defaults). Tamaño mínimo de hoja: controla la profundidad. En R: \texttt{ranger}.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Out-of-bag: el error de prueba gratis}
+\small
+¿Recuerdan el $0.632$ de la sesión 2? Cada remuestra bootstrap deja fuera $\approx 36.8\%$ de las observaciones.
+\pause
+
+\vspace{0.2cm}
+\textbf{La consecuencia práctica en un bosque:}
+\begin{itemize}\itemsep5pt
+  \item Para cada observación $i$, aproximadamente un tercio de los árboles \textbf{no la vieron} al entrenarse.
+  \item \textbf{Predicción OOB de $i$:} promediar (o votar) usando \emph{solo} esos árboles.
+  \item \textbf{Error OOB:} el error de esas predicciones sobre toda la muestra --- una estimación del error de prueba \textbf{sin apartar datos ni correr CV}. \pause
+\end{itemize}
+
+\vspace{0.1cm}
+\begin{itemize}\itemsep4pt
+  \item Con $B$ grande, el error OOB es esencialmente equivalente al de LOOCV --- gratis, como subproducto del entrenamiento.
+  \item En la práctica: monitorear el error OOB mientras crece $B$; cuando se aplana, ya hay árboles suficientes.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Importancia de variables (y sus trampas)}
+\small
+El bosque pierde la interpretabilidad del árbol único; el sustituto estándar es la \textbf{importancia de variables}:
+\begin{enumerate}\itemsep3pt
+  \item \textbf{Por impureza:} sumar, sobre todos los cortes de todos los árboles, la reducción de RSS/Gini que aportó cada variable.
+  \item \textbf{Por permutación:} barajar la variable $j$ en las muestras OOB y medir cuánto empeora la predicción.
+\end{enumerate}
+\pause
+
+\vspace{0.15cm}
+\textbf{Las trampas (léanlas dos veces):}
+\begin{itemize}\itemsep4pt
+  \item La importancia por impureza está \textbf{sesgada} hacia variables continuas o con muchas categorías (más umbrales donde cortar $=$ más oportunidades de ``lucirse''). \pause
+  \item Con predictores \textbf{correlacionados}, la importancia se \textbf{reparte} entre ellos: una variable crucial puede lucir mediocre porque su gemela absorbió la mitad del crédito. \pause
+  \item Y la de siempre, elevada al cuadrado: \textbf{importancia predictiva $\neq$ efecto causal}. La lección del proxy de la sesión 3 aplica intacta a los bosques.
+\end{itemize}
+\pause
+
+\begin{block}{Uso correcto}
+Exploración y diagnóstico --- qué mirar primero, qué medir mejor --- no conclusiones sobre mecanismos.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Random Forest en la práctica}
+\small
+\textbf{Por qué es el caballo de batalla:}
+\begin{itemize}\itemsep4pt
+  \item Excelente desempeño \emph{out-of-the-box}: casi sin tuning, sin estandarizar, robusto a ruido y a predictores irrelevantes.
+  \item Paraleliza trivialmente ($B$ árboles independientes); error OOB gratis.
+\end{itemize}
+\pause
+
+\textbf{Sus límites (para no idolatrar):}
+\begin{itemize}\itemsep4pt
+  \item \textbf{No extrapola}: predice promedios de hojas $\Rightarrow$ fuera del rango observado de los predictores, devuelve constantes. Fatal para tendencias (¡series de tiempo con crecimiento!). \pause
+  \item Superficies muy suaves o efectos estrictamente lineales: un modelo lineal bien regularizado puede ganarle con menos datos.
+  \item Costo en memoria/predicción con $B$ y $n$ grandes.
+\end{itemize}
+\pause
+
+\vspace{0.1cm}
+\begin{block}{Teaser de la sesión 6}
+Un Random Forest cuyas hojas estiman \emph{efectos del tratamiento} en vez de medias de $y$ se llama \textbf{causal forest} (Athey \& Wager). La maquinaria de hoy es prerrequisito directo.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 3: BOOSTING
+%%#################################################
+%%#################################################
+\section{Boosting y XGBoost}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Boosting: la filosofía opuesta}
+\small
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lll}
+\hline
+ & Random Forest & Boosting \\
+\hline
+Árboles & grandes, sin podar & \textbf{pequeños} (\emph{weak learners}) \\
+Entrenamiento & en paralelo, independientes & \textbf{en secuencia}, corrigiendo al anterior \\
+Agregación & promedio & \textbf{suma ponderada} \\
+Ataca & la varianza & el \textbf{sesgo} (parte rígido) \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+
+\vspace{0.25cm}
+\textbf{La forma del modelo final:}
+\[ \hat{f}(x) \;=\; \sum_{m=1}^{B} \nu \, \hat{T}_m(x) \]
+una suma de $B$ árboles pequeños (a menudo de 1--3 cortes), cada uno multiplicado por una \textbf{tasa de aprendizaje} $\nu$ pequeña.
+\pause
+
+\vspace{0.15cm}
+\begin{itemize}\itemsep3pt
+  \item Cada árbol aporta un ajuste \emph{modesto} donde el ensamble acumulado todavía se equivoca.
+  \item El lema del boosting: \textbf{aprender despacio}. Muchos pasos chicos generalizan mejor que pocos pasos grandes.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El algoritmo, en su versión más simple (regresión)}
+\small
+\textbf{Boosting con pérdida cuadrática:}
+\begin{enumerate}\itemsep4pt
+  \item Inicializar $\hat{f}(x) = 0$ y residuos $r_i = y_i$.
+  \item Para $m = 1, \ldots, B$:
+  \begin{itemize}\itemsep2pt
+    \item Ajustar un árbol pequeño $\hat{T}_m$ a los \textbf{residuos actuales} $(x_i, r_i)$.
+    \item Actualizar el modelo: $\hat{f}(x) \leftarrow \hat{f}(x) + \nu\, \hat{T}_m(x)$.
+    \item Actualizar los residuos: $r_i \leftarrow r_i - \nu\, \hat{T}_m(x_i)$.
+  \end{itemize}
+  \item Devolver $\hat{f}(x) = \sum_m \nu\, \hat{T}_m(x)$.
+\end{enumerate}
+\pause
+
+\vspace{0.15cm}
+\begin{center}
+\begin{tikzpicture}[node distance=0.45cm, every node/.style={font=\scriptsize}]
+  \node (y) [draw, rounded corners, fill=gray!12, minimum height=0.7cm] {$y$};
+  \node (t1) [draw, rounded corners, fill=green!12, right=0.45cm of y, minimum height=0.7cm] {$\hat{T}_1$ sobre $y$};
+  \node (t2) [draw, rounded corners, fill=green!12, right=0.45cm of t1, minimum height=0.7cm] {$\hat{T}_2$ sobre $r_1$};
+  \node (t3) [draw, rounded corners, fill=green!12, right=0.45cm of t2, minimum height=0.7cm] {$\hat{T}_3$ sobre $r_2$};
+  \node (dots) [right=0.35cm of t3] {$\cdots$};
+  \draw[-{Stealth}, thick] (y) -- (t1);
+  \draw[-{Stealth}, thick] (t1) -- node[above, font=\tiny]{resid.} (t2);
+  \draw[-{Stealth}, thick] (t2) -- node[above, font=\tiny]{resid.} (t3);
+  \draw[-{Stealth}, thick] (t3) -- (dots);
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep2pt
+  \item Cada árbol ve \textbf{lo que falta por explicar} --- no los datos originales.
+  \item ¿Y por qué a esto se le dice \emph{gradient} boosting? Esa es la idea grande que sigue.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La idea grande: descenso de gradiente en el espacio de funciones}
+\small
+\textbf{Observación de Friedman (2001):} el residuo \emph{es} el gradiente negativo de la pérdida cuadrática respecto a la predicción:
+\[ -\,\frac{\partial}{\partial f(x_i)} \; \frac{1}{2}\big( y_i - f(x_i) \big)^2 \;=\; y_i - f(x_i) \;=\; r_i \]
+\pause
+Ajustar árboles a los residuos $=$ dar pasos de \textbf{descenso de gradiente}, donde el ``parámetro'' es la función $f$ entera y $\nu$ es el tamaño del paso.
+\pause
+
+\vspace{0.15cm}
+\textbf{La generalización inmediata:} para \emph{cualquier} pérdida $L$, ajustar cada árbol al \textbf{pseudo-residuo}
+\[ r_{im} \;=\; -\left[ \frac{\partial L\big(y_i, f(x_i)\big)}{\partial f(x_i)} \right]_{f = \hat{f}_{m-1}} \]
+\pause
+\begin{itemize}\itemsep4pt
+  \item Pérdida absoluta $\Rightarrow$ $r_{im} = \mathrm{sign}(y_i - \hat{f}(x_i))$: robusta a atípicos.
+  \item Pérdida logística $\Rightarrow$ $r_{im} = y_i - \hat{p}(x_i)$: boosting para \textbf{clasificación} (¡lo reencontraremos en la sesión 5!).
+\end{itemize}
+\pause
+
+\begin{block}{Por qué esto es elegante}
+Un solo algoritmo, cualquier pérdida diferenciable: regresión, clasificación, cuantiles, conteos. El histórico AdaBoost (1997) resulta ser el caso particular de la pérdida exponencial.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Las tres perillas del boosting (y cómo interactúan)}
+\small
+\begin{enumerate}\itemsep5pt
+  \item \textbf{$B$ --- número de árboles.} A diferencia del RF, aquí $B$ grande \textbf{sí sobreajusta}: el ensamble sigue ajustando residuos hasta memorizar el ruido. $B$ se elige por CV o \emph{early stopping} (parar cuando el error de validación deja de bajar). \pause
+  \item \textbf{$\nu$ --- tasa de aprendizaje} (típico $0.01$--$0.1$). Más pequeña $=$ pasos más cortos $=$ mejor generalización\ldots\ a cambio de necesitar más árboles: $\nu$ y $B$ se compensan (bajar $\nu$ 10$\times$ $\approx$ subir $B$ 10$\times$). \pause
+  \item \textbf{$d$ --- profundidad de cada árbol.} Controla el \textbf{orden de interacción}: $d = 1$ (\emph{stumps}) $=$ modelo aditivo puro; $d = 2$ permite interacciones de a pares; rara vez conviene $d > 6$. \pause
+\end{enumerate}
+
+\vspace{0.1cm}
+\begin{block}{La disciplina del boosting}
+Es el método más poderoso de esta sesión \textbf{y} el más fácil de arruinar: exige validación cuidadosa (sesión 2) y paciencia con el tuning. El RF perdona; el boosting no.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{XGBoost: la implementación que se comió al mundo}
+\small
+\textbf{Chen \& Guestrin (2016)} --- \emph{gradient boosting} $+$ ingeniería $+$ una idea estadística:
+\pause
+\begin{itemize}\itemsep5pt
+  \item \textbf{Objetivo con regularización explícita:} cada árbol se elige minimizando
+  \[ \sum_i L\big(y_i, \hat{f}(x_i)\big) \;+\; \gamma\, T \;+\; \tfrac{1}{2}\lambda \sum_{j=1}^{T} w_j^2 \]
+  donde $T$ es el número de hojas y $w_j$ sus valores: \textbf{Ridge y poda dentro del propio boosting} --- las sesiones 2 y hoy, fundidas en una fórmula. \pause
+  \item \textbf{Expansión de segundo orden} de la pérdida (gradiente \emph{y} hessiano): pasos tipo Newton, más precisos que el gradiente puro. \pause
+  \item \emph{Column subsampling} (la idea del RF, prestada), manejo nativo de faltantes, paralelización por histogramas. \pause
+\end{itemize}
+
+\vspace{0.1cm}
+\begin{itemize}\itemsep3pt
+  \item \textbf{Primos:} LightGBM (histogramas agresivos, crecimiento por hoja: más veloz en $n$ grande) y CatBoost (categóricas de alta cardinalidad sin \emph{dummies}).
+  \item El resultado: la familia que domina las competencias de Kaggle en datos \textbf{tabulares} desde hace una década --- redes incluidas.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 4: RF VS BOOSTING
+%%#################################################
+%%#################################################
+\section{RF vs.\ boosting: ¿cuál y cuándo?}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cara a cara}
+\small
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lll}
+\hline
+ & Random Forest & Boosting (XGBoost) \\
+\hline
+Estrategia & bajar \textbf{varianza} promediando & bajar \textbf{sesgo} sumando en secuencia \\
+$B$ grande & inofensivo (satura) & \textbf{sobreajusta} (early stopping) \\
+Tuning & mínimo ($m$) & delicado ($\nu$, $d$, $B$, regularización) \\
+Error sin CV & OOB gratis & no (validación aparte) \\
+Paralelización & trivial & parcial (dentro de cada árbol) \\
+Desempeño típico & excelente, robusto & \textbf{el mejor}, si se afina bien \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+
+\vspace{0.25cm}
+\textbf{Regla práctica para sus proyectos:}
+\begin{enumerate}\itemsep4pt
+  \item Empezar con una \textbf{regresión regularizada} (línea base interpretable; sesiones 2--3).
+  \item \textbf{Random Forest}: el salto no lineal con mínimo esfuerzo; su OOB dice si valió la pena.
+  \item \textbf{XGBoost} afinado con CV: cuando el objetivo es exprimir la última gota de desempeño.
+  \item Y reportar los tres en la misma tabla, evaluados en el \textbf{mismo} conjunto de prueba.
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Y en economía?}
+\small
+\textbf{Dónde los verán trabajando:}
+\begin{itemize}\itemsep5pt
+  \item \textbf{Predicción de pobreza e ingresos} para focalización: RF/boosting sobre encuestas y registros --- el estándar en los \emph{proxy means tests} modernos. \pause
+  \item \textbf{Riesgo de crédito}: XGBoost es, con distancia, el método más desplegado en \emph{scoring} bancario y \emph{fintech} (la aplicación de esta semana). \pause
+  \item \textbf{Precios hedónicos e inmobiliarios}: interacciones ubicación $\times$ características que un modelo lineal no captura sin ayuda. \pause
+  \item \textbf{Insumo de otros métodos}: en el \emph{double ML} de la sesión 6, los bosques y el boosting serán los motores de predicción dentro de un procedimiento causal ortogonalizado --- la predicción al servicio de $\beta$.
+\end{itemize}
+\pause
+
+\vspace{0.1cm}
+\begin{block}{La advertencia de siempre, por tercera vez}
+RF y boosting producen \textbf{predicciones e importancias}, no efectos causales. Interpretarlos causalmente sin diseño es el mismo pecado de la sesión 3, con mejor maquillaje.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Recap}
+\small
+\begin{enumerate}\itemsep6pt
+  \item \textbf{CART}: particiones binarias greedy; Gini/entropía para crecer, poda costo--complejidad ($\alpha$ por CV) para generalizar. Interpretable, flexible\ldots\ y de varianza altísima.
+  \item \textbf{Bagging}: promediar árboles sobre remuestras bootstrap. La cuenta clave: $\Var(\bar{Z}) = \rho\sigma^2 + \frac{1-\rho}{B}\sigma^2$ --- aumentar $B$ nunca sobreajusta, pero el piso lo pone $\rho$.
+  \item \textbf{Random Forest}: descorrelacionar sorteando $m \approx \sqrt{p}$ candidatos por corte; error \textbf{OOB} gratis; importancias útiles pero sesgadas, repartidas por correlación y \textbf{jamás causales}.
+  \item \textbf{Boosting}: árboles pequeños en secuencia sobre pseudo-residuos $=$ \textbf{descenso de gradiente en el espacio de funciones}; funciona con cualquier pérdida; aprender despacio ($\nu$ chico, $B$ por early stopping).
+  \item \textbf{XGBoost}: boosting con regularización explícita ($\gamma T + \frac{\lambda}{2}\|w\|^2$) y segundo orden --- el dominador de los datos tabulares.
+  \item \textbf{Flujo de trabajo}: base lineal $\rightarrow$ RF $\rightarrow$ XGBoost, todos evaluados en la misma prueba.
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}
+\vspace{2.0cm}
+\Large{Preparación para la próxima clase\ldots}
+\end{frame}
+
+%%#################################################
+%%#################################################
+%% PARTE 5: PRÓXIMA CLASE
+%%#################################################
+%%#################################################
+
+%%=================================================
+\begin{frame}{Para aprovechar al máximo la próxima sesión}
+\small
+\textbf{Lecturas obligatorias de esta semana:}
+\begin{itemize}\itemsep4pt
+  \item ISLR, cap.\ 8 completo. \\ \textcolor{gray}{Guía: es el capítulo que mejor mapea a la sesión de hoy; las figuras 8.1--8.6 son las de clase.}
+  \item Breiman (2001), \emph{Random Forests}. \\ \textcolor{gray}{Guía: secciones 1--2; el resto, para quien quiera las cotas formales.}
+\end{itemize}
+
+\textbf{Recomendadas:} Friedman (2001; secs.\ 1--4); Chen \& Guestrin (2016); Biau \& Scornet (2016, survey amable de RF).
+\pause
+
+\vspace{0.2cm}
+\textbf{Próxima sesión:} clasificación y métricas de desempeño --- logística por máxima verosimilitud, $k$-NN, SVM, y la parte que decide todo en la práctica: \textbf{ROC/AUC, umbrales por costos y desbalanceo de clases}. Repasen máxima verosimilitud de Econometría II.
+\pause
+
+\vspace{0.2cm}
+\textbf{Aplicación de esta semana en R:} riesgo de crédito --- árbol vs.\ Random Forest (\texttt{rpart}, \texttt{ranger}) vs.\ XGBoost (\texttt{xgboost}), comparados por CV.
+\end{frame}
+
+%%=================================================
+%% Referencias
+\begin{frame}{Referencias esenciales}
+\footnotesize
+\begin{itemize}\itemsep2pt
+  \item James, G., Witten, D., Hastie, T., \& Tibshirani, R. (2021). \emph{An Introduction to Statistical Learning} (2.\ ed.). Springer. Cap.\ 8. [ISLR]
+  \item Hastie, T., Tibshirani, R., \& Friedman, J. (2009). \emph{The Elements of Statistical Learning} (2.\ ed.). Springer. Caps.\ 9, 10 y 15. [ESL]
+  \item Breiman, L., Friedman, J., Olshen, R., \& Stone, C. (1984). \emph{Classification and Regression Trees}. Wadsworth.
+  \item Breiman, L. (1996). Bagging Predictors. \emph{Machine Learning}, 24(2), 123--140.
+  \item Breiman, L. (2001). Random Forests. \emph{Machine Learning}, 45(1), 5--32.
+  \item Biau, G., \& Scornet, E. (2016). A Random Forest Guided Tour. \emph{TEST}, 25(2), 197--227.
+  \item Freund, Y., \& Schapire, R. (1997). A Decision-Theoretic Generalization of On-Line Learning and an Application to Boosting. \emph{JCSS}, 55(1), 119--139.
+  \item Friedman, J. (2001). Greedy Function Approximation: A Gradient Boosting Machine. \emph{Annals of Statistics}, 29(5), 1189--1232.
+  \item Chen, T., \& Guestrin, C. (2016). XGBoost: A Scalable Tree Boosting System. \emph{KDD '16}, 785--794.
+  \item Wager, S., \& Athey, S. (2018). Estimation and Inference of Heterogeneous Treatment Effects using Random Forests. \emph{JASA}, 113(523), 1228--1242.
+\end{itemize}
+\normalsize
+\end{frame}
+
+%%=================================================
+%% End document
+\end{document}

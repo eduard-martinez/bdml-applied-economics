@@ -1,0 +1,770 @@
+\documentclass{beamer}
+
+%% Tema y configuraciones
+\usetheme{Boadilla}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=.,      % color de enlaces internos (índices, refs)
+    urlcolor=blue,    % color de URLs
+    citecolor=.,      % color de referencias bibliográficas
+}
+
+%% Helpers (macros y notación)
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\1}{\mathbb{I}}
+\newcommand{\MSE}{\mathrm{MSE}}
+\newcommand{\RSS}{\mathrm{RSS}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+%% Encabezado
+\title[BDML]{Big Data y Machine Learning \\ para Economía Aplicada}
+\subtitle{Week 02: La regresión lineal como máquina de predecir --- y cómo evaluar una predicción}
+\author{Eduard F. Martinez Gonzalez, Ph.D.}
+\institute[]{Departamento de Economía, Universidad Icesi}
+\date{\today}
+
+%%=================================================
+%% Begin document
+\begin{document}
+
+%%=================================================
+%% Primer slide
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%=================================================
+\begin{frame}{Previously\ldots}
+\small
+\begin{itemize}\itemsep5pt
+  \item \textbf{$Y$, no $\beta$:} predecir y explicar son preguntas distintas; un coeficiente significativo no es una predicción (Kim \& Zilinsky). \pause
+  \item El objetivo es el \textbf{riesgo de generalización}; el mejor predictor cuadrático es la media condicional $f(x) = \E[Y \mid X = x]$, y $\sigma^2$ es el techo de lo aprendible. \pause
+  \item \textbf{Reglas de oro:} \#1 el error de entrenamiento es optimista; \#2 el conjunto de prueba se usa al final y una sola vez. \pause
+  \item $\MSE = \text{Sesgo}^2 + \text{Varianza} + \sigma^2$: la complejidad baja el sesgo y sube la varianza; el óptimo es interior (la curva U). \pause
+  \item Dejamos abierta una pregunta: ¿cuánto de una elección anticipa una \textbf{recta}, y \emph{dónde} se equivoca?
+\end{itemize}
+\pause
+\vspace{0.2cm}
+\begin{block}{Hoy}
+Convertimos la regresión que ya conocen en una \textbf{máquina de predecir}, le añadimos algo de flexibilidad y, sobre todo, aprendemos a \textbf{evaluar} una predicción de regresión: con qué métricas, contra qué baseline, con qué gráficos y dónde mirar los errores.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Presentación estudiantil: Kim \& Zilinsky (2024)}
+\framesubtitle{Quince minutos, tres preguntas}
+\small
+\begin{enumerate}\itemsep6pt
+  \item \textbf{¿Qué se predice y por qué importa?} El voto presidencial y la identificación partidista en EE.UU.\ (ANES 1952--2020) usando \emph{solo} demografía: la capacidad predictiva como medida del \emph{sorting} social.
+  \item \textbf{¿Con qué datos y método, y cómo se evalúa?} \emph{Random forests} y logit por ola, partición 80/20, tuning por validación cruzada; accuracy, AUC y F1 fuera de muestra, con intervalos de confianza y una regresión de la accuracy sobre el año.
+  \item \textbf{¿Qué se encuentra y cómo se interpreta?} Cerca del 64\% de acierto, estable en 70 años, con efectos marginales crecientes: el argumento de que la asociación y la predictibilidad conjunta son cosas distintas.
+\end{enumerate}
+\pause
+\vspace{0.2cm}
+\begin{block}{Para el resto de la sala}
+Mientras escuchan, anoten: ¿qué baseline usan los autores para decir que 64\% es ``poco''? ¿Por qué la AUC sube y la accuracy no? Volveremos sobre ambas preguntas hoy y en la sesión 3.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 1: LA REGRESIÓN LINEAL COMO MÁQUINA DE PREDECIR
+%%#################################################
+%%#################################################
+\section{La regresión lineal como máquina de predecir}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{OLS con otros ojos}
+\framesubtitle{La misma fórmula, otro objetivo}
+\small
+El modelo y el estimador son los de Econometría I:
+\[ y_i = \beta_0 + \beta_1 x_{i1} + \cdots + \beta_p x_{ip} + \varepsilon_i, \qquad \hat{\beta} = (\mathbf{X}'\mathbf{X})^{-1}\mathbf{X}'\mathbf{y} \;=\; \argmin_{\beta} \RSS(\beta) \]
+\pause
+Lo que cambia es \textbf{para qué} lo usamos:
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lll}
+\hline
+ & \textbf{Como econometristas} & \textbf{Como predictores} \\
+\hline
+Nos importa & $\hat{\beta}_j$ y su error estándar & $\hat{y}_0 = x_0'\hat{\beta}$ en datos nuevos \\
+Elegimos variables & por teoría e identificación & por error de prueba \\
+Variable ``no significativa'' & se discute & se queda si ayuda a predecir \\
+Colinealidad & problema para $\hat{\beta}$ & casi irrelevante para $\hat{y}$ \\
+La prueba del modelo & supuestos, $R^2$, tests & RMSE en la prueba \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\vspace{0.15cm}
+\begin{block}{Por qué empezar aquí}
+OLS aproxima la media condicional, es estable, se ajusta en milisegundos y se interpreta sin esfuerzo. Todo método del curso se compara contra él: si un bosque no le gana en la prueba, el bosque sobra.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Predictores cualitativos e interacciones}
+\small
+\textbf{Cualitativos:} una variable con $K$ categorías entra como $K-1$ \emph{dummies} (estrato, localidad, tipo de inmueble). Para predecir no importa cuál es la base; importa no dejar categorías con dos o tres observaciones.
+\pause
+\vspace{0.15cm}
+\textbf{Interacciones:} el efecto de una variable depende de otra.
+\[ \text{precio} = \beta_0 + \beta_1\,\text{área} + \beta_2\,\text{estrato} + \beta_3\,(\text{área} \times \text{estrato}) + \varepsilon \]
+El metro cuadrado vale distinto en estrato 6 que en estrato 2: sin la interacción, la recta se equivoca \emph{sistemáticamente} en ambos extremos.
+\pause
+\vspace{0.15cm}
+\begin{itemize}\itemsep4pt
+  \item En un modelo predictivo las interacciones son \textbf{perillas de flexibilidad}: cada una añade parámetros y baja el sesgo a costa de varianza.
+  \item Con $p$ variables hay $p(p-1)/2$ interacciones de segundo orden: elegirlas a mano no escala. Los árboles (sesión 6) las descubren solos; el Lasso (sesión 5) las filtra. \pause
+\end{itemize}
+\begin{block}{Regla práctica}
+Añadan interacciones cuando la economía las sugiera (precio $\times$ ubicación, edad $\times$ educación) y dejen que la \textbf{prueba} diga si valieron la pena.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Transformaciones: el logaritmo y los polinomios}
+\small
+\textbf{Log de $y$:} con precios, ingresos o ventas, modelar $\log y$ estabiliza la varianza y convierte efectos multiplicativos en aditivos. Ojo al volver: $\exp(\widehat{\log y})$ predice la \emph{mediana}, no la media; el RMSE se reporta en la escala que le importa al usuario.
+\pause
+\vspace{0.15cm}
+\textbf{Polinomios:} $y = \beta_0 + \beta_1 x + \beta_2 x^2 + \cdots + \beta_d x^d + \varepsilon$ sigue siendo \textbf{lineal en los parámetros}: es OLS sobre nuevas columnas.
+\begin{itemize}\itemsep3pt
+  \item El grado $d$ es la perilla de complejidad de la sesión 1: $d = 1$ subajusta, $d = 15$ memoriza.
+  \item Un polinomio es \textbf{global}: para curvar la relación en el rango de precios bajos, cambia también su forma en los precios altos. Y fuera del rango de los datos, explota.
+\end{itemize}
+\pause
+\vspace{0.15cm}
+\begin{block}{Lo que queremos}
+Flexibilidad \textbf{local}: que la forma de la relación en una zona de $x$ no obligue a nada en otra. Eso es lo que dan los escalones y los \emph{splines}.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Más allá de la linealidad (I): escalones y \emph{splines}}
+\small
+\begin{center}
+\begin{tikzpicture}[scale=0.5]
+% Panel A: escalones
+\begin{scope}[shift={(0,0)}]
+  \draw[->] (0,0) -- (6.4,0) node[below, font=\scriptsize] {$x$};
+  \draw[->] (0,0) -- (0,4.2);
+  \foreach \px/\py in {0.3/1.1, 0.7/1.5, 1.2/2.2, 1.6/2.6, 2.1/3.1, 2.6/3.3, 3.0/3.2, 3.5/2.9, 3.9/2.5, 4.4/2.3, 4.9/2.4, 5.4/2.8, 5.9/3.3} \fill (\px,\py) circle (2.4pt);
+  \draw[blue, very thick] (0.1,1.6) -- (2.0,1.6);
+  \draw[blue, very thick] (2.0,3.05) -- (4.0,3.05);
+  \draw[blue, very thick] (4.0,2.7) -- (6.1,2.7);
+  \draw[dashed, gray] (2.0,0) -- (2.0,4.0); \draw[dashed, gray] (4.0,0) -- (4.0,4.0);
+  \node[font=\scriptsize, gray] at (2.0,-0.55) {nodo}; \node[font=\scriptsize, gray] at (4.0,-0.55) {nodo};
+  \node[font=\scriptsize] at (3.2,4.5) {\textbf{Escalones} (constante por tramo)};
+\end{scope}
+% Panel B: spline
+\begin{scope}[shift={(7.3,0)}]
+  \draw[->] (0,0) -- (6.4,0) node[below, font=\scriptsize] {$x$};
+  \draw[->] (0,0) -- (0,4.2);
+  \foreach \px/\py in {0.3/1.1, 0.7/1.5, 1.2/2.2, 1.6/2.6, 2.1/3.1, 2.6/3.3, 3.0/3.2, 3.5/2.9, 3.9/2.5, 4.4/2.3, 4.9/2.4, 5.4/2.8, 5.9/3.3} \fill (\px,\py) circle (2.4pt);
+  \draw[blue, very thick] plot[smooth, tension=0.8] coordinates {(0.2,1.0) (1.2,2.1) (2.1,3.0) (3.0,3.25) (3.9,2.6) (4.6,2.3) (5.4,2.75) (6.0,3.35)};
+  \draw[dashed, gray] (2.0,0) -- (2.0,4.0); \draw[dashed, gray] (4.0,0) -- (4.0,4.0);
+  \node[font=\scriptsize, gray] at (2.0,-0.55) {nodo}; \node[font=\scriptsize, gray] at (4.0,-0.55) {nodo};
+  \node[font=\scriptsize] at (3.2,4.5) {\textbf{Spline cúbico} (suave y local)};
+\end{scope}
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Escalones:} cortar $x$ en tramos y ajustar una constante por tramo (\emph{dummies} de rango). Fácil de leer, feo en los bordes.
+  \item \textbf{Spline cúbico:} un polinomio de grado 3 por tramo, obligado a empalmar suavemente en los \textbf{nodos}. Sigue siendo OLS sobre una \emph{base} de columnas construidas de $x$ (la construcción, en el apéndice). \pause
+  \item La perilla de complejidad es el \textbf{número de nodos} (o grados de libertad); ISL recomienda nodos en cuantiles de $x$ y \emph{splines naturales} (lineales en los extremos) para no explotar en las colas.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Más allá de la linealidad (II): modelos aditivos generalizados}
+\small
+Un \textbf{GAM} aplica la idea variable por variable y luego suma:
+\[ y = \beta_0 + f_1(x_1) + f_2(x_2) + \cdots + f_p(x_p) + \varepsilon, \]
+con cada $f_j$ un \emph{spline} (o un escalón, o una recta).
+\pause
+\vspace{0.15cm}
+\begin{itemize}\itemsep4pt
+  \item \textbf{Flexible donde importa:} el precio puede subir con el área de forma cóncava y caer con la distancia al centro de forma convexa, sin que ustedes escriban la forma.
+  \item \textbf{Interpretable:} cada $f_j$ se grafica; es el ``efecto marginal'' no lineal de $x_j$. Esta figura reaparece en la sesión 7 con otro nombre (dependencia parcial).
+  \item \textbf{Su límite:} es \emph{aditivo}: no descubre interacciones salvo que se las escriban. Los árboles sí. \pause
+\end{itemize}
+\begin{block}{Dónde estamos en el mapa flexibilidad--interpretabilidad}
+OLS $\rightarrow$ polinomios $\rightarrow$ \emph{splines} $\rightarrow$ GAM es la escalera lineal: cada peldaño baja el sesgo y conserva la lectura. En la sesión 6 saltamos a otra escalera.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{$k$-NN de regresión: el promedio de los vecinos}
+\small
+El método no paramétrico más simple: para predecir en $x_0$, promediar la $y$ de las $k$ observaciones \textbf{más cercanas}:
+\[ \hat{f}(x_0) \;=\; \frac{1}{k} \sum_{i \in N_k(x_0)} y_i \]
+\begin{center}
+\begin{tikzpicture}[scale=0.54]
+  \draw[->] (0,0) -- (6.4,0) node[below, font=\scriptsize] {$x$};
+  \draw[->] (0,0) -- (0,4.2);
+  \foreach \px/\py in {0.3/1.1, 0.7/1.5, 1.2/2.2, 1.6/2.6, 2.1/3.1, 2.6/3.3, 3.0/3.2, 3.5/2.9, 3.9/2.5, 4.4/2.3, 4.9/2.4, 5.4/2.8, 5.9/3.3} \fill (\px,\py) circle (2.4pt);
+  \draw[red, very thick] plot coordinates {(0.2,1.3) (0.9,1.6) (1.4,2.1) (1.8,2.65) (2.3,3.0) (2.8,3.25) (3.25,3.1) (3.7,2.75) (4.15,2.45) (4.65,2.35) (5.15,2.55) (5.6,2.95) (6.0,3.15)};
+  \draw[blue, thick] (0.1,1.85) -- (6.1,3.0);
+  \node[font=\scriptsize, red] at (4.6,3.6) {$k$-NN, $k = 3$};
+  \node[font=\scriptsize, blue] at (1.4,3.5) {OLS};
+\end{tikzpicture}
+\end{center}
+\pause
+\begin{itemize}\itemsep3pt
+  \item \textbf{Sin fórmula}: la forma la ponen los datos. La perilla es $k$: $k = 1$ memoriza (varianza), $k = n$ predice la media (sesgo).
+  \item Necesita una \textbf{distancia}: hay que estandarizar las $x$ (un metro cuadrado no es un estrato).
+  \item Vive en la sesión 3 como clasificador (votación de vecinos) y aquí como regresor (promedio de vecinos).
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La maldición de la dimensionalidad}
+\framesubtitle{Por qué ``los vecinos'' dejan de ser vecinos}
+\small
+Con predictores uniformes en $[0,1]^p$, ¿qué fracción del rango de \emph{cada} variable hay que abarcar para capturar el 10\% de los datos como vecinos?
+\vspace{0.1cm}
+\begin{center}
+\footnotesize
+\begin{tabular}{lccccc}
+\hline
+$p$ & 1 & 2 & 5 & 10 & 100 \\
+\hline
+Lado del ``vecindario'' ($0{,}1^{1/p}$) & 0,10 & 0,32 & 0,63 & 0,79 & 0,98 \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\vspace{0.15cm}
+\begin{itemize}\itemsep4pt
+  \item Con $p = 10$, el ``vecindario'' que reúne el 10\% de los datos cubre el 79\% del rango de cada variable: los vecinos ya no se parecen a $x_0$ en nada. El promedio local se vuelve un promedio \emph{global} y el sesgo explota.
+  \item Los métodos que dependen de distancias ($k$-NN, kernels) sufren esto de frente; los lineales, los \emph{splines} aditivos y los árboles lo esquivan porque \textbf{imponen estructura}. \pause
+\end{itemize}
+\begin{block}{Lección}
+Flexibilidad total solo es gratis con pocas variables y muchos datos. En alta dimensión, algo de \emph{estructura} (linealidad, aditividad, particiones) es lo que permite aprender. Ese es el argumento de fondo de las sesiones 5 y 6.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Lineal vs.\ $k$-NN: ¿cuándo gana cada uno?}
+\framesubtitle{ISL, sección 3.5}
+\small
+\begin{itemize}\itemsep5pt
+  \item Si la verdadera $f$ es (casi) lineal, \textbf{OLS gana}: usa los datos para estimar dos números, $k$-NN los gasta en dibujar una forma que no necesitaba. \pause
+  \item Si $f$ es claramente no lineal y $p$ es pequeño, \textbf{$k$-NN puede ganar}: su sesgo es menor y la varianza extra se paga con datos. \pause
+  \item A medida que $p$ crece, \textbf{OLS vuelve a ganar aunque esté mal especificado}: la maldición de la dimensionalidad castiga más a $k$-NN de lo que el sesgo castiga a la recta. \pause
+\end{itemize}
+\vspace{0.1cm}
+\begin{block}{La regla de comparación del curso}
+Nunca se sabe a priori. Se ajustan los dos en el mismo conjunto de entrenamiento, se evalúan en el \emph{mismo} conjunto de prueba con la \emph{misma} métrica, y gana el que gana. Esa tabla comparativa es el producto central de cada aplicación del curso.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 2: CÓMO EVALUAR UNA PREDICCIÓN DE REGRESIÓN
+%%#################################################
+%%#################################################
+\section{Cómo evaluar una predicción de regresión}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{El error de prueba tiene muchas caras}
+\small
+Con $n_{t}$ observaciones de prueba y predicciones $\hat{y}_i$:
+\vspace{0.1cm}
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{llp{4.3cm}}
+\hline
+Métrica & Fórmula & Cuándo usarla \\
+\hline
+MSE / RMSE & $\frac{1}{n_t}\sum (y_i - \hat{y}_i)^2$ \; / \; $\sqrt{\MSE}$ & la estándar; RMSE en unidades de $y$; castiga los errores grandes \\
+MAE & $\frac{1}{n_t}\sum |y_i - \hat{y}_i|$ & robusta a extremos; el ``error típico'' \\
+MAPE & $\frac{100}{n_t}\sum |y_i - \hat{y}_i| / |y_i|$ & error relativo; inservible cuando $y \approx 0$ \\
+$R^2$ de prueba & $1 - \sum (y_i - \hat{y}_i)^2 \big/ \sum (y_i - \bar{y}_{\text{train}})^2$ & varianza de prueba explicada; \textbf{puede ser negativo} \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\vspace{0.15cm}
+\begin{itemize}\itemsep3pt
+  \item RMSE $\geq$ MAE siempre; una brecha grande entre ambos delata \textbf{pocos errores muy grandes} (colas).
+  \item El RMSE en pesos no dice nada solo: se reporta \textbf{relativo} a la media o a la desviación estándar de $y$. En Gelvez et al.\ (2026), el RMSE del \emph{vote share} es de 14,5 a 17,9 puntos, que equivale a entre 20\% y 43\% del promedio según la elección. \pause
+  \item Reporten siempre \textbf{más de una}: cada métrica cuenta una parte de la historia.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{$R^2$ de prueba no es el $R^2$ de Econometría}
+\small
+\begin{columns}[T]
+\begin{column}{0.5\textwidth}
+\textbf{El $R^2$ que conocen (en muestra):}
+\begin{itemize}\itemsep3pt
+  \item Nunca baja al añadir variables.
+  \item Está entre 0 y 1 por construcción.
+  \item Mide ajuste, no capacidad de predecir: el polinomio de grado 15 tiene $R^2 = 1$.
+\end{itemize}
+\end{column}
+\begin{column}{0.5\textwidth}
+\textbf{El $R^2$ de prueba:}
+\begin{itemize}\itemsep3pt
+  \item \textbf{Puede bajar} al añadir variables: es la curva U.
+  \item \textbf{Puede ser negativo}: el modelo predice peor que la media del entrenamiento.
+  \item Compara contra un baseline explícito: predecir $\bar{y}_{\text{train}}$ para todos.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.25cm}
+\begin{block}{Cómo leerlo}
+``$R^2$ de prueba $= 0{,}66$'' significa: sobre mesas que el modelo nunca vio, el error cuadrático es un 34\% del que cometería quien predijera el promedio para todas. Es una \emph{reducción de error}, no una ``bondad de ajuste''.
+\end{block}
+\pause
+\vspace{0.1cm}
+Un detalle que separa a los cuidadosos: el denominador usa $\bar{y}$ de \textbf{entrenamiento} (lo único que el modelo pudo conocer), y las métricas se calculan \textbf{una sola vez} sobre la prueba.
+\end{frame}
+
+%%=================================================
+\begin{frame}{Siempre contra un \emph{baseline}}
+\small
+Una métrica sola no dice si el modelo es bueno. Tres comparaciones que nunca faltan:
+\pause
+\begin{enumerate}\itemsep5pt
+  \item \textbf{La media} (o la mediana): el modelo que no usa $x$. Si no le ganan, no hay señal aprendible con esas variables. \pause
+  \item \textbf{El modelo simple}: OLS con las variables obvias. Es lo que ya sabían hacer; todo lo demás debe justificar su complejidad frente a él. \pause
+  \item \textbf{La regla vigente}: el avalúo del tasador, el puntaje del Sisbén, el pronóstico del analista. Muchos papers ganan aquí su interés: McBride \& Nichols (2018) mejoran la focalización de pobreza entre 2 y 18 puntos frente a la regresión \emph{stepwise} que usaban los programas. \pause
+\end{enumerate}
+\vspace{0.1cm}
+\begin{block}{Cómo se ve en un paper}
+Una tabla con una fila por modelo y una columna por métrica, todas calculadas en la \emph{misma} prueba. Kim \& Zilinsky la usan para decir que 64\% es poco: con partido político la accuracy sube mucho, y con un baseline de ``predecir al ganador'' el aporte de la demografía es menor de lo que parece.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Predicho vs.\ observado: la figura que nunca falta}
+\small
+\begin{columns}[T]
+\begin{column}{0.5\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.5]
+  \draw[->] (0,0) -- (6.4,0) node[below, font=\scriptsize] {observado $y$};
+  \draw[->] (0,0) -- (0,6.4) node[above, font=\scriptsize] {predicho $\hat{y}$};
+  \draw[dashed, gray, thick] (0,0) -- (6.1,6.1);
+  \node[font=\scriptsize, gray, rotate=45] at (5.3,5.75) {$45^\circ$};
+  \foreach \px/\py in {0.5/1.5, 0.8/1.3, 1.1/1.9, 1.4/1.8, 1.7/2.4, 2.0/2.1, 2.3/2.7, 2.6/2.5, 2.9/3.1, 3.2/3.0, 3.5/3.6, 3.8/3.3, 4.1/3.9, 4.4/3.7, 4.7/4.3, 5.0/4.0, 5.3/4.6, 5.6/4.3, 5.9/4.8} \fill[blue!80] (\px,\py) circle (2.2pt);
+  \draw[blue, thick] (0.4,1.3) -- (6.0,4.75);
+  \node[font=\scriptsize, blue] at (1.6,0.7) {pendiente $< 1$};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.5\textwidth}
+\vspace{0.2cm}
+\begin{itemize}\itemsep4pt
+  \item Cada punto es una observación de \textbf{prueba}; la diagonal es la predicción perfecta.
+  \item El patrón típico: \textbf{pendiente menor que uno}. Se \textbf{sobrepredice} en la cola baja y se \textbf{subpredice} en la alta: las predicciones se \emph{comprimen} hacia la media.
+  \item Gelvez et al.\ (2026, Fig.~3) muestran esto para el \emph{vote share}: más compresión en 2006 y 2010, menos en 2022.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.1cm}
+\begin{block}{Qué buscar en la figura}
+Curvatura (no linealidad omitida), abanico (varianza que crece con $y$), grupos desplazados y puntos aislados (errores grandes). El $R^2$ resume; la figura explica.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Por qué se comprimen las predicciones?}
+\framesubtitle{No es un error del modelo: es lo que una media condicional \emph{debe} hacer}
+\small
+Con $Y = f(X) + \varepsilon$ y $\varepsilon$ independiente de $X$:
+\[ \Var(Y) \;=\; \Var\big(f(X)\big) + \sigma^2 \qquad \Longrightarrow \qquad \Var\big(f(X)\big) \;\leq\; \Var(Y). \]
+\pause
+\begin{itemize}\itemsep4pt
+  \item Aun el predictor \textbf{perfecto} $f$ es menos disperso que $Y$: el ruido $\varepsilon$ está en $y$ pero no en $\hat{y}$. Las observaciones extremas lo son en parte por $\varepsilon$, que nadie puede predecir. \pause
+  \item Un modelo bien calibrado cumple $\E[Y \mid \hat{y}] = \hat{y}$: la regresión de $y$ sobre $\hat{y}$ tiene pendiente 1. La compresión aparece al mirar la figura ``al revés'' ($\hat{y}$ contra $y$), que es como solemos dibujarla. \pause
+  \item Un modelo \textbf{sobreajustado} rompe la regla: sus $\hat{y}$ son \emph{más} dispersas que lo que la señal justifica, y la pendiente de $y$ sobre $\hat{y}$ cae por debajo de 1.
+\end{itemize}
+\pause
+\begin{block}{Consecuencia práctica}
+Una compresión moderada es normal; la pregunta útil es \emph{cuánto} error queda en las colas y si un modelo más flexible lo reduce. De eso trata la siguiente diapositiva.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Dónde se concentra el error (I): por cuantiles de $y$}
+\small
+\begin{columns}[T]
+\begin{column}{0.5\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.45]
+  \draw[->] (0,0) -- (7.2,0);
+  \draw[->] (0,0) -- (0,4.4) node[above, font=\scriptsize] {RMSE};
+  \node[font=\scriptsize] at (3.6,-0.8) {decil de $y$ observado};
+  \foreach \i/\h in {0/3.2, 1/2.3, 2/1.8, 3/1.5, 4/1.4, 5/1.4, 6/1.5, 7/1.9, 8/2.6, 9/3.6} {
+    \fill[blue!60] (\i*0.68+0.2, 0) rectangle (\i*0.68+0.72, \h);
+  }
+  \foreach \i in {1,...,10} { \node[font=\tiny] at (\i*0.68-0.22, -0.35) {\i}; }
+  \node[font=\scriptsize, gray] at (3.6,-1.3) {Esquema: el patrón típico};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.5\textwidth}
+\vspace{0.1cm}
+\begin{itemize}\itemsep4pt
+  \item Calculen el RMSE \textbf{por decil} de $y$ observado en la prueba. La U es la huella de la compresión: el modelo falla más en los extremos.
+  \item En vivienda, las casas muy baratas y muy caras; en elecciones, las mesas casi unánimes: \emph{justo} donde la decisión importa.
+  \item Bogin \& Shui (2020) reportan $R^2$ por cuartil de precio: la métrica agregada escondía las colas.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.1cm}
+\begin{block}{Dos remedios que veremos}
+Más flexibilidad donde la relación se curva (sesiones 5--6) y, a veces, otra pérdida: si errar en la cola alta cuesta más, el MSE simétrico no es el objetivo correcto.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Dónde se concentra el error (II): por subgrupos y en el mapa}
+\small
+La misma pregunta, cortando por \textbf{quién} y por \textbf{dónde}:
+\pause
+\begin{itemize}\itemsep5pt
+  \item \textbf{Por subgrupo:} RMSE por localidad, por estrato, por tipo de inmueble; por región o por ruralidad en las mesas. Un modelo con buen RMSE global que falla sistemáticamente en un grupo es un problema de \textbf{equidad} además de precisión (sesiones 3 y 7). \pause
+  \item \textbf{En el mapa:} con datos georreferenciados, pinten los residuos. Manchas de un mismo signo delatan variables omitidas de la localización, y anticipan por qué la validación cruzada aleatoria engaña con datos espaciales (sesión 4). \pause
+  \item \textbf{Los residuos como diagnóstico:} Pace \& Hayunga (2020) ajustan árboles \emph{sobre los residuos} de un hedónico y encuentran estructura que la especificación lineal dejó por fuera. Si un método flexible predice los residuos de su modelo, su modelo tiene sesgo. \pause
+\end{itemize}
+\begin{block}{La costumbre que vale la pena adquirir}
+Después de la tabla de métricas, tres figuras: predicho vs.\ observado, error por decil de $y$, y error por el subgrupo (o el mapa) que le importa a la pregunta.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Extrapolación: predecir donde no hay datos}
+\small
+\begin{columns}[T]
+\begin{column}{0.5\textwidth}
+\begin{center}
+\begin{tikzpicture}[scale=0.5]
+  \draw[->] (0,0) -- (6.6,0) node[below, font=\scriptsize] {$x$};
+  \draw[->] (0,0) -- (0,4.6);
+  \fill[gray!12] (4.2,0) rectangle (6.4,4.4);
+  \node[font=\scriptsize, gray] at (5.3,4.25) {sin datos};
+  \foreach \px/\py in {0.4/1.4, 0.9/1.7, 1.4/2.2, 1.9/2.4, 2.4/2.9, 2.9/3.0, 3.4/3.2, 3.9/3.3} \fill (\px,\py) circle (2.4pt);
+  \draw[blue, very thick] plot[smooth] coordinates {(0.3,1.3) (1.4,2.2) (2.6,2.95) (3.9,3.3) (4.6,3.15) (5.3,2.2) (5.9,0.6)};
+  \draw[red, very thick] (3.9,3.3) -- (6.3,3.3);
+  \node[font=\scriptsize, blue] at (5.2,1.3) {polinomio};
+  \node[font=\scriptsize, red] at (5.55,3.0) {$k$-NN / árbol};
+\end{tikzpicture}
+\end{center}
+\end{column}
+\begin{column}{0.5\textwidth}
+\vspace{0.1cm}
+\begin{itemize}\itemsep4pt
+  \item Fuera del rango de entrenamiento ningún modelo \emph{sabe}: el polinomio se dispara; $k$-NN y los árboles se quedan \textbf{planos} en el último valor.
+  \item La recta extrapola ``razonablemente'' solo si la relación sigue siendo lineal allá afuera, cosa que los datos no pueden confirmar.
+  \item Los \emph{splines naturales} imponen linealidad en las colas: un compromiso explícito.
+\end{itemize}
+\end{column}
+\end{columns}
+\pause
+\vspace{0.15cm}
+\begin{block}{Regla}
+Reporten el \textbf{rango} de los predictores en el entrenamiento y marquen las predicciones fuera de él: un modelo entrenado con apartamentos de 40 a 200 m$^2$ no sabe nada de uno de 600.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Un ejemplo publicado: avalúos rurales}
+\framesubtitle{Bogin \& Shui (2020), \emph{Journal of Real Estate Finance and Economics}}
+\small
+Con más de 400 mil avalúos de Fannie Mae y Freddie Mac (2012--2016), partición 80/20 y 115 variables, comparan un hedónico lineal con métodos que veremos en la sesión 6:
+\vspace{0.1cm}
+\begin{center}
+\footnotesize
+\begin{tabular}{lcc}
+\hline
+Modelo & $R^2$ de prueba & RMSE de prueba \\
+\hline
+Hedónico (OLS) & 0,680 & 0,319 \\
+\emph{Random forest} & 0,722 & 0,297 \\
+\emph{Boosting} & 0,676 & 0,321 \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\vspace{0.15cm}
+\begin{itemize}\itemsep4pt
+  \item La tabla es el formato canónico: misma prueba, mismas métricas, una fila por modelo. Y la lectura no es ``el bosque gana'': gana por 4 puntos de $R^2$, mientras que el \emph{boosting} mal afinado \emph{pierde} contra la recta. La flexibilidad no es gratis ni automática. \pause
+  \item Luego repiten el $R^2$ en los cuartiles inferior y superior de precio: allí el hedónico se degrada más. La ventaja del bosque vive en las colas.
+  \item Y discuten el costo computacional: un hedónico se estima en segundos; un bosque con 400 mil filas, no. Ese es también un criterio.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 3: APLICACIÓN GUIADA
+%%#################################################
+%%#################################################
+\section{Aplicación guiada: precios de vivienda en Bogotá}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Los datos y la pregunta}
+\small
+\textbf{Datos:} anuncios de venta de vivienda en Bogotá con precio, área, habitaciones, baños, estrato, tipo de inmueble, localidad y distancias a puntos de interés (centro, parques, estaciones).
+\pause
+\vspace{0.15cm}
+\textbf{Pregunta predictiva:} ¿con qué precisión podemos anticipar el precio de un inmueble que no está en la muestra? Es el problema de un avaluador automático (\emph{AVM}), de un banco que valora garantías, o de un hogar que quiere saber si le están cobrando de más.
+\pause
+\vspace{0.15cm}
+\textbf{Decisiones antes de ajustar nada:}
+\begin{enumerate}\itemsep3pt
+  \item $y = \log(\text{precio})$; las métricas se reportan también en pesos.
+  \item Partición 80/20 \textbf{estratificada por deciles de $y$}; la prueba queda bajo llave.
+  \item Un baseline: la media del entrenamiento. Un modelo de referencia: OLS con área, habitaciones, baños y estrato.
+\end{enumerate}
+\pause
+\begin{block}{Lo que no haremos hoy}
+Elegir hiperparámetros con la prueba. Para escoger $k$ o el número de nodos usaremos un pedazo del entrenamiento (validación); la manera correcta de hacerlo llega en la sesión 4.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cuatro modelos, una misma prueba}
+\small
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{llccc}
+\hline
+ & Modelo & RMSE (log) & MAE (pesos) & $R^2$ prueba \\
+\hline
+0 & Media del entrenamiento & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & 0 \\
+1 & OLS básico: área, habitaciones, baños, estrato & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+2 & OLS $+$ localidad $+$ interacciones $+$ \emph{splines} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+3 & $k$-NN, mismas variables estandarizadas & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} & \textcolor{gray}{en clase} \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+\vspace{0.15cm}
+\textbf{Preguntas que la tabla debe responder:}
+\begin{itemize}\itemsep3pt
+  \item ¿Cuánto explican cuatro variables? ¿Cuánto añade la localización? (La distancia entre la fila 1 y la 2 es el valor de la geografía.)
+  \item ¿Le gana $k$-NN a la recta flexible? Con $p$ moderado y muchos datos, puede; si no, la maldición de la dimensionalidad acaba de aparecer en vivo. \pause
+  \item ¿Qué modelo tiene mayor brecha RMSE--MAE? Ese es el que más sufre en las colas.
+\end{itemize}
+\vspace{0.1cm}
+\textcolor{gray}{Las celdas se completan con el código de la sesión; los números no se conocen hasta correrlo, y esa es la gracia.}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Después de la tabla: las tres figuras}
+\small
+\begin{enumerate}\itemsep6pt
+  \item \textbf{Predicho vs.\ observado} para los modelos 1 y 2 (en log). Esperamos compresión en ambos y menos curvatura en el 2. Si el modelo 2 sigue curvado en los precios altos, la relación con el área no es la que asumimos ni con \emph{splines}: pista para la sesión 6. \pause
+  \item \textbf{Error por decil de precio.} La U dirá cuánto pierde cada modelo en los apartamentos más caros. Es la fila que le importa a un banco: ahí están las garantías grandes. \pause
+  \item \textbf{Residuo promedio por localidad}, en tabla y en mapa. Manchas de un mismo signo señalan lo que la localidad y las distancias no capturan (ruido, vías, comercio, vista). Es la motivación de la validación espacial de la sesión 4 y de las variables satelitales de la sesión 8.
+\end{enumerate}
+\pause
+\vspace{0.1cm}
+\begin{block}{El reporte de una aplicación, de aquí en adelante}
+Tabla de métricas en la misma prueba $+$ predicho vs.\ observado $+$ error por decil $+$ error por el subgrupo relevante. Cuatro piezas; una página.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}[fragile]{Cómo se ve en R (\texttt{tidymodels})}
+\scriptsize
+\begin{verbatim}
+library(tidymodels); set.seed(2026)
+split <- initial_split(vivienda, prop = 0.8, strata = log_precio)
+train <- training(split); test <- testing(split)   # test bajo llave
+
+rec <- recipe(log_precio ~ area + habitaciones + banos + estrato +
+              localidad + dist_centro, data = train) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_ns(area, dist_centro, deg_free = 4) |>     # splines naturales
+  step_normalize(all_numeric_predictors())         # escala para k-NN
+
+m_ols <- linear_reg() |> set_engine("lm")
+m_knn <- nearest_neighbor(neighbors = 15) |>
+  set_engine("kknn") |> set_mode("regression")
+
+fit_ols <- workflow(rec, m_ols) |> fit(train)
+pred    <- augment(fit_ols, test)                  # predice en la prueba
+metrics(pred, truth = log_precio, estimate = .pred) # rmse, rsq, mae
+\end{verbatim}
+\normalsize
+\small
+\begin{itemize}\itemsep2pt
+  \item El preprocesamiento vive \textbf{dentro} de la receta: se aprende en el entrenamiento y se aplica a la prueba. Esa disciplina es el \emph{pipeline} de la sesión 4.
+  \item \texttt{rsq} es una correlación al cuadrado; el $R^2$ de prueba se calcula a mano.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 4: CIERRE
+%%#################################################
+%%#################################################
+\section{Cierre}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Recap}
+\small
+\begin{enumerate}\itemsep6pt
+  \item \textbf{OLS como máquina de predecir:} mismas fórmulas, otro criterio. Las variables se eligen por error de prueba; la colinealidad deja de asustar; el modelo lineal es el \emph{baseline} contra el que todo lo demás se mide.
+  \item \textbf{Flexibilidad controlada:} interacciones, polinomios, escalones, \emph{splines} y GAM bajan el sesgo y conservan la lectura; $k$-NN quita la fórmula y paga con varianza y con la \textbf{maldición de la dimensionalidad}.
+  \item \textbf{Métricas:} RMSE, MAE, MAPE y $R^2$ de prueba (que puede ser negativo); siempre más de una, siempre relativas a $y$, siempre contra un baseline.
+  \item \textbf{Predicho vs.\ observado:} la compresión hacia la media es normal ($\Var(f(X)) \leq \Var(Y)$); lo que importa es cuánto error queda en las colas y en qué subgrupos.
+  \item \textbf{El reporte estándar:} tabla en la misma prueba $+$ tres figuras (predicho vs.\ observado, error por decil, error por subgrupo o mapa). Y marcar la extrapolación.
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}
+\vspace{2.0cm}
+\Large{Preparación para la próxima clase\ldots}
+\end{frame}
+
+%%#################################################
+%%#################################################
+%% PARTE 5: PRÓXIMA CLASE
+%%#################################################
+%%#################################################
+
+%%=================================================
+\begin{frame}{Para aprovechar al máximo la próxima sesión}
+\small
+\textbf{Lecturas obligatorias de esta semana:}
+\begin{itemize}\itemsep4pt
+  \item ISL, cap.\ 3 (secs.\ 3.1--3.3 y 3.5) y cap.\ 7 (secs.\ 7.1--7.4 y 7.7). \\ \textcolor{gray}{Guía: la sección 3.5 (lineal vs.\ $k$-NN) y las figuras 7.4 y 7.5 son las de clase.}
+  \item Bogin \& Shui (2020), \emph{Appraisal Accuracy and Automated Valuation Models in Rural Areas}, JREFE. \\ \textcolor{gray}{Guía: la tabla de comparación y la sección de resultados por cuartil de precio.}
+\end{itemize}
+
+\textbf{Para la presentación estudiantil de la sesión 3:} Bogin \& Shui (2020) o Pace \& Hayunga (2020), \emph{Examining the Information Content of Residuals from Hedonic and Spatial Models Using Trees and Forests}.
+\pause
+
+\vspace{0.1cm}
+\textbf{Próxima sesión --- clasificación:} cuando $y$ es una categoría (¿ganó el candidato en la mesa?, ¿el hogar es pobre?, ¿el crédito se paga?): la regresión logística como modelo de referencia, $k$-NN y LDA en breve, y la parte que decide todo en la práctica: \textbf{matriz de confusión, umbrales con costos, ROC/AUC, calibración y desbalanceo}. Repasen máxima verosimilitud de Econometría II. Lectura previa: ISL cap.\ 4 (secs.\ 4.1--4.4).
+\pause
+
+\vspace{0.1cm}
+\textbf{Aplicación de esta semana en R:} precios de vivienda en Bogotá con \texttt{tidymodels}: los cuatro modelos, la tabla y las tres figuras.
+\end{frame}
+
+%%=================================================
+%% Referencias
+\begin{frame}{Referencias esenciales}
+\scriptsize
+\begin{itemize}\itemsep2pt
+  \item James, G., Witten, D., Hastie, T., \& Tibshirani, R. (2021). \emph{An Introduction to Statistical Learning} (2.\ ed.). Springer. Caps.\ 3 y 7. [ISL]
+  \item Hastie, T., Tibshirani, R., \& Friedman, J. (2009). \emph{The Elements of Statistical Learning} (2.\ ed.). Springer. Caps.\ 2--3 y 5. [ESL]
+  \item Mullainathan, S., \& Spiess, J. (2017). Machine Learning: An Applied Econometric Approach. \emph{JEP}, 31(2), 87--106.
+  \item Kim, S.-y.\ S., \& Zilinsky, J. (2024). Division Does Not Imply Predictability. \emph{Political Behavior}, 46, 67--87.
+  \item Gelvez, J.\ D., Cardiles, A., Martínez-González, E.\ F., \& Muñoz, M. (2026). How Predictable Is an Election? A Machine-Learning Approach to Electoral Behavior in Colombia. Documento de trabajo.
+  \item Bogin, A.\ N., \& Shui, J. (2020). Appraisal Accuracy and Automated Valuation Models in Rural Areas. \emph{Journal of Real Estate Finance and Economics}, 60, 40--52.
+  \item Pace, R.\ K., \& Hayunga, D.\ K. (2020). Examining the Information Content of Residuals from Hedonic and Spatial Models Using Trees and Forests. \emph{Journal of Real Estate Finance and Economics}, 60, 170--180.
+  \item McBride, L., \& Nichols, A. (2018). Retooling Poverty Targeting Using Out-of-Sample Validation and Machine Learning. \emph{World Bank Economic Review}, 32(3), 531--550.
+  \item Kuhn, M., \& Silge, J. (2022). \emph{Tidy Modeling with R}. O'Reilly. \href{https://www.tmwr.org}{[disponible online]}
+\end{itemize}
+\normalsize
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% APÉNDICE: PARA PROFUNDIZAR
+%%#################################################
+%%#################################################
+\appendix
+\section{Apéndice: para profundizar}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{A1. OLS en forma matricial y la media condicional}
+\small
+\textbf{1. El problema:} con $\mathbf{X}$ de $n \times (p+1)$ (columna de unos incluida),
+\[ \hat{\beta} = \argmin_{\beta} \; (\mathbf{y} - \mathbf{X}\beta)'(\mathbf{y} - \mathbf{X}\beta). \]
+\pause
+\textbf{2. Condición de primer orden:} $-2\mathbf{X}'(\mathbf{y} - \mathbf{X}\hat{\beta}) = 0 \;\Rightarrow\; \mathbf{X}'\mathbf{X}\hat{\beta} = \mathbf{X}'\mathbf{y}$, y si $\mathbf{X}'\mathbf{X}$ es invertible,
+\[ \hat{\beta} = (\mathbf{X}'\mathbf{X})^{-1}\mathbf{X}'\mathbf{y}, \qquad \hat{\mathbf{y}} = \mathbf{X}(\mathbf{X}'\mathbf{X})^{-1}\mathbf{X}'\mathbf{y} \equiv \mathbf{H}\mathbf{y}. \]
+\pause
+\textbf{3. Lectura predictiva:} $\hat{\mathbf{y}}$ es la proyección de $\mathbf{y}$ sobre el espacio generado por las columnas de $\mathbf{X}$: la mejor aproximación \emph{lineal} a la media condicional. Si $\E[Y \mid X]$ es lineal, OLS la estima sin sesgo; si no, estima la mejor recta, y el sesgo que queda es el precio de la rigidez.
+\pause
+\vspace{0.1cm}
+\textbf{4. Por qué la colinealidad no asusta al predictor:} $\hat{\mathbf{y}} = \mathbf{H}\mathbf{y}$ depende del \emph{espacio} de las columnas, no de cómo se repartan los coeficientes entre columnas parecidas. Dos coeficientes inestables pueden sumar una predicción estable. (La varianza de $\hat{y}_0$ sí crece con $p$: esa es la varianza de la sesión 1.)
+\end{frame}
+
+%%=================================================
+\begin{frame}{A2. La base de un \emph{spline}: cómo se construyen las columnas}
+\small
+\textbf{Polinomio cúbico por tramos con un nodo en $\xi$:} dos cúbicas distintas a cada lado de $\xi$, unidas de modo que la función, su primera y su segunda derivada sean continuas en $\xi$.
+\pause
+\vspace{0.1cm}
+\textbf{La base de potencias truncadas} lo logra con una sola columna extra:
+\[ y = \beta_0 + \beta_1 x + \beta_2 x^2 + \beta_3 x^3 + \beta_4\,(x - \xi)^3_+ + \varepsilon, \qquad (x-\xi)^3_+ = \max\{0, (x-\xi)^3\}. \]
+Antes de $\xi$ la columna vale cero; después añade una cúbica que arranca en cero con derivadas cero: el empalme es suave por construcción.
+\pause
+\vspace{0.1cm}
+\begin{itemize}\itemsep3pt
+  \item Con $K$ nodos: $K + 4$ columnas, es decir, $K + 4$ grados de libertad. Todo se estima por OLS.
+  \item Un \textbf{spline natural} impone linealidad más allá de los nodos extremos y ahorra 4 grados de libertad: menos varianza en las colas, donde hay pocos datos.
+  \item En R, \texttt{splines::ns(x, df = 4)} construye la base; \texttt{step\_ns()} la mete en la receta. Los \emph{B-splines} son otra base, numéricamente más estable, del mismo espacio.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{A3. La cuenta de la compresión: $\Var(Y) = \Var(f(X)) + \sigma^2$}
+\small
+\textbf{1. Ley de la varianza total:} para cualquier $Y$ y $X$,
+\[ \Var(Y) = \E\big[\Var(Y \mid X)\big] + \Var\big(\E[Y \mid X]\big). \]
+\pause
+\textbf{2. Con $Y = f(X) + \varepsilon$, $\E[\varepsilon \mid X] = 0$ y $\Var(\varepsilon \mid X) = \sigma^2$:} $\E[Y \mid X] = f(X)$ y $\Var(Y \mid X) = \sigma^2$, luego
+\[ \Var(Y) = \sigma^2 + \Var\big(f(X)\big) \;\geq\; \Var\big(f(X)\big). \]
+\pause
+\textbf{3. Calibración y pendiente:} si $\hat{y}$ está bien calibrado, $\E[Y \mid \hat{y}] = \hat{y}$, de modo que en la regresión de $y$ sobre $\hat{y}$ la pendiente es 1 y el intercepto 0. La regresión \emph{inversa}, de $\hat{y}$ sobre $y$, tiene pendiente $\Cov(y, \hat{y})/\Var(y) = \Var(\hat{y})/\Var(y) \leq 1$: esa es la compresión que se ve al dibujar $\hat{y}$ contra $y$.
+\pause
+\vspace{0.1cm}
+\begin{block}{Uso}
+La pendiente de $y$ sobre $\hat{y}$ en la prueba es un test de calibración gratuito: por debajo de 1 hay sobreajuste (predicciones demasiado dispersas); por encima, subajuste. Vuelve en la sesión 3 para probabilidades.
+\end{block}
+\end{frame}
+
+%%=================================================
+%% End document
+\end{document}

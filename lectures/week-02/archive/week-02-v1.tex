@@ -1,0 +1,798 @@
+\documentclass{beamer}
+
+%% Tema y configuraciones
+\usetheme{Boadilla}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=.,      % color de enlaces internos (índices, refs)
+    urlcolor=blue,    % color de URLs
+    citecolor=.,      % color de referencias bibliográficas
+}
+
+%% Helpers (macros y notación)
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\1}{\mathbb{I}}
+\newcommand{\MSE}{\mathrm{MSE}}
+\newcommand{\RSS}{\mathrm{RSS}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+%% Encabezado
+\title[BDML]{Big Data y Machine Learning \\ para Economía Aplicada}
+\subtitle{Week 02: Validación Cruzada, Selección de Modelos y Regularización}
+\author{Eduard F. Martinez Gonzalez, Ph.D.}
+\institute[]{Departamento de Economía, Universidad Icesi}
+\date{\today}
+
+%%=================================================
+%% Begin document
+\begin{document}
+
+%%=================================================
+%% Primer slide
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%=================================================
+\begin{frame}{Previously\ldots}
+\small
+En la sesión pasada construimos el marco conceptual:
+\begin{itemize}\itemsep5pt
+  \item El objetivo del ML supervisado es minimizar el \textbf{riesgo de generalización} $R(f) = \E[L(Y, f(X))]$ --- el error en datos \textbf{nuevos}.
+  \item El \textbf{error de entrenamiento es optimista}: evaluar donde se entrenó premia la memorización.
+  \item El error de prueba tiene forma de \textbf{U} en la complejidad, porque $\MSE = \text{Sesgo}^2 + \text{Varianza} + \sigma^2$.
+  \item Y quedó una promesa: aceptar \textbf{algo de sesgo} para reducir mucha varianza mejora la predicción.
+\end{itemize}
+\pause
+
+\vspace{0.2cm}
+\begin{block}{Hoy: las dos herramientas que faltan}
+\begin{enumerate}
+  \item \textbf{Medir:} ¿cómo estimamos el error de prueba sin desperdiciar datos? (validación cruzada, bootstrap, criterios de información)
+  \item \textbf{Girar la perilla:} la primera familia que ejecuta el trade-off sesgo--varianza: la \textbf{regularización} (Ridge, Lasso, Elastic Net).
+\end{enumerate}
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 1: ESTIMAR EL ERROR DE GENERALIZACIÓN
+%%#################################################
+%%#################################################
+\section{Estimar el error de generalización}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{El punto de partida: el conjunto de validación}
+\small
+La receta de la sesión 1: apartar una fracción de los datos y evaluar ahí.
+
+\vspace{0.2cm}
+\begin{center}
+\begin{tikzpicture}
+  \draw[fill=blue!12] (0,0) rectangle (6.0,0.8);
+  \node at (3.0,0.4) {\small Entrenamiento};
+  \draw[fill=orange!20] (6.0,0) rectangle (9.0,0.8);
+  \node at (7.5,0.4) {\small Validación};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\textbf{Funciona, pero tiene dos defectos:}
+\begin{enumerate}\itemsep5pt
+  \item \textbf{Alta variabilidad:} la estimación del error depende fuertemente de \emph{cuáles} observaciones cayeron en validación. Con otra partición aleatoria, otra conclusión.
+  \item \textbf{Desperdicia datos:} el modelo se entrena con solo una parte de la muestra. Con menos datos se aprende peor $\Rightarrow$ tiende a \textbf{sobreestimar} el error que tendría el modelo entrenado con todo. \pause
+\end{enumerate}
+
+\vspace{0.2cm}
+\begin{block}{La idea de la validación cruzada}
+Reutilizar \textbf{todos} los datos: que cada observación sea validación \emph{alguna vez} y entrenamiento \emph{el resto} de las veces.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Leave-One-Out CV (LOOCV)}
+\small
+\textbf{El extremo:} dejar \textbf{una sola} observación afuera, entrenar con las otras $n-1$, predecirla; repetir para cada $i$:
+\[ \mathrm{CV}_{(n)} \;=\; \frac{1}{n} \sum_{i=1}^{n} \big( y_i - \hat{y}_{(-i)} \big)^2 \]
+donde $\hat{y}_{(-i)}$ es la predicción para $i$ del modelo entrenado \textbf{sin} $i$.
+\pause
+
+\vspace{0.2cm}
+\textbf{Ventajas:}
+\begin{itemize}\itemsep3pt
+  \item Cada modelo usa $n-1$ datos $\Rightarrow$ casi \textbf{sin sesgo} respecto al error verdadero.
+  \item No hay aleatoriedad: siempre da el mismo número.
+\end{itemize}
+\pause
+
+\textbf{Desventajas:}
+\begin{itemize}\itemsep3pt
+  \item Hay que ajustar el modelo $n$ veces (costoso con $n$ grande).
+  \item \textbf{Varianza alta:} los $n$ modelos comparten $n-2$ observaciones $\Rightarrow$ son casi idénticos $\Rightarrow$ sus errores están muy correlacionados $\Rightarrow$ promediarlos reduce poco la varianza (¡la lección del promedio correlacionado volverá en la sesión 4!).
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El atajo de LOOCV en regresión lineal}
+\small
+Para mínimos cuadrados existe una identidad notable: con \textbf{un solo ajuste} sobre todos los datos,
+\[ \mathrm{CV}_{(n)} \;=\; \frac{1}{n} \sum_{i=1}^{n} \left( \frac{y_i - \hat{y}_i}{1 - h_i} \right)^2 \]
+donde $h_i$ es el \emph{leverage} de la observación $i$ (el elemento $i$ de la diagonal de la matriz sombrero $\mathbf{H} = \mathbf{X}(\mathbf{X}'\mathbf{X})^{-1}\mathbf{X}'$).
+\pause
+
+\vspace{0.2cm}
+\begin{itemize}\itemsep4pt
+  \item \textbf{Intuición:} una observación con leverage alto ``atrae'' la recta hacia sí misma; su residuo dentro de muestra es artificialmente pequeño. Dividir por $(1 - h_i)$ deshace ese favor.
+  \item El costo pasa de $n$ ajustes a \textbf{uno}.
+\end{itemize}
+\pause
+
+\begin{block}{Alcance}
+La identidad vale para mínimos cuadrados (y suavizadores lineales). Para árboles, redes o \emph{boosting} no hay atajo: por eso en la práctica domina el $k$-fold.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{$k$-fold: el estándar de la industria}
+\small
+Partir la muestra en $k$ bloques (\emph{folds}) de tamaño similar; cada bloque es validación una vez:
+
+\vspace{0.2cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.78]
+\foreach \row in {0,1,2,3,4} {
+  \node[font=\scriptsize] at (-1.2,-0.75*\row+0.3) {Iter.\ \the\numexpr\row+1\relax};
+  \foreach \col in {0,1,2,3,4} {
+    \ifnum\col=\row
+      \draw[fill=orange!25] (1.35*\col,-0.75*\row) rectangle (1.35*\col+1.25,-0.75*\row+0.6);
+    \else
+      \draw[fill=blue!10] (1.35*\col,-0.75*\row) rectangle (1.35*\col+1.25,-0.75*\row+0.6);
+    \fi
+  }
+}
+\node[font=\scriptsize, fill=orange!25, draw] at (8.45,-0.4) {validación};
+\node[font=\scriptsize, fill=blue!10, draw] at (8.45,-1.3) {entrenamiento};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\[ \mathrm{CV}_{(k)} \;=\; \frac{1}{k} \sum_{j=1}^{k} \MSE_j \qquad \text{(con folds de igual tamaño)} \]
+
+\begin{itemize}\itemsep3pt
+  \item Cada modelo entrena con fracción $(k-1)/k$ de los datos; se ajusta $k$ veces.
+  \item \textbf{Estándar:} $k = 5$ o $k = 10$.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Qué $k$ elegir? El sesgo--varianza\ldots\ del propio CV}
+\small
+El estimador $\mathrm{CV}$ es, él mismo, una variable aleatoria: tiene sesgo y varianza.
+\pause
+
+\vspace{0.2cm}
+\begin{center}
+\footnotesize
+\begin{tabular}{lccc}
+\hline
+ & Sesgo & Varianza & Costo \\
+\hline
+Conjunto de validación & alto (pesimista) & alta & 1 ajuste \\
+LOOCV & $\approx 0$ & alta & $n$ ajustes \\
+$k$-fold ($k=5,10$) & bajo & moderada & $k$ ajustes \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+
+\vspace{0.2cm}
+\begin{itemize}\itemsep4pt
+  \item \textbf{Sesgo:} entrenar con menos datos que $n$ hace ver los modelos peores de lo que serán $\Rightarrow$ el CV es algo \emph{pesimista}; el efecto se agrava con folds pequeños ($k$ chico).
+  \item \textbf{Varianza:} LOOCV promedia errores de modelos casi clones (muy correlacionados); $k$-fold usa modelos más distintos entre sí.
+  \item \textbf{Veredicto práctico:} $k = 10$ por defecto; $k = 5$ si el ajuste es costoso.
+\end{itemize}
+\pause
+
+\begin{block}{Ojo economistas: datos en el tiempo}
+Con series de tiempo \textbf{no} se barajan folds: se valida ``hacia adelante'' (entrenar en el pasado, predecir el futuro, ventana rodante). Barajar filtra el futuro hacia el pasado.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{CV para elegir hiperparámetros}
+\small
+El uso central del CV en este curso: \textbf{girar perillas}. Para una grilla de valores $\lambda_1, \ldots, \lambda_m$: calcular $\mathrm{CV}(\lambda)$ y elegir.
+
+\vspace{0.2cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.72]
+  \draw[->] (0,0) -- (8.0,0) node[below, font=\scriptsize] {$\lambda$ (más penalización $\rightarrow$ más simple)};
+  \draw[->] (0,0) -- (0,4.0) node[above, font=\scriptsize] {$\mathrm{CV}(\lambda)$};
+  % error bars + points
+  \foreach \x/\y in {0.6/3.0, 1.4/2.35, 2.2/1.95, 2.9/1.8, 3.6/1.85, 4.3/2.0, 5.0/2.25, 5.8/2.6, 6.6/3.05, 7.4/3.5} {
+    \draw[gray] (\x,\y-0.32) -- (\x,\y+0.32);
+    \fill[red] (\x,\y) circle (2.3pt);
+  }
+  \draw[dashed, gray, thick] (2.9,0) -- (2.9,3.6);
+  \node[font=\scriptsize] at (2.9,3.85) {$\lambda_{\min}$};
+  \draw[dashed, blue, thick] (4.3,0) -- (4.3,3.6);
+  \node[font=\scriptsize, blue] at (4.5,3.85) {$\lambda_{1SE}$};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep3pt
+  \item $\lambda_{\min}$: el mínimo de la curva.
+  \item \textbf{Regla de una desviación estándar (1-SE):} elegir el modelo \textbf{más simple} cuyo CV esté a menos de 1 error estándar del mínimo. Razón: el propio CV es ruidoso; ante empate estadístico, parsimonia.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La trampa del \emph{leakage}: el CV mal hecho}
+\framesubtitle{La forma incorrecta y la correcta de hacer CV (ESL, sec.\ 7.10.2)}
+\small
+\textbf{Escenario:} $n = 50$, $p = 5000$ predictores, y una $y$ generada \textbf{al azar} (ninguna relación real).
+
+\vspace{0.15cm}
+\textbf{Procedimiento (¿ven el error?):}
+\begin{enumerate}\itemsep3pt
+  \item Con \textbf{todos} los datos, filtrar los 100 predictores más correlacionados con $y$.
+  \item Con esos 100, ajustar un modelo y estimar su error por 5-fold CV.
+\end{enumerate}
+\pause
+
+\textcolor{gray}{\textbf{Resultado:} el CV reporta un error bajísimo\ldots\ en datos donde no hay \emph{nada} que predecir. El paso 1 ya ``vio'' las respuestas de todos los folds: los predictores fueron elegidos usando también las observaciones que luego fingimos no conocer.}
+\pause
+
+\vspace{0.2cm}
+\textbf{La regla:} todo paso que use $y$ --- selección de variables, imputación con $y$, remuestreo, estandarización con estadísticos de todo el conjunto --- debe ocurrir \textbf{dentro} de cada fold, solo con sus datos de entrenamiento.
+\pause
+
+\begin{block}{Regla de oro \#3}
+El CV no valida modelos: valida \textbf{pipelines completos}.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Bootstrap: la idea general}
+\small
+\textbf{Pregunta distinta:} ¿qué tan \textbf{incierto} es un estadístico? (un coeficiente, una mediana, un AUC, un ratio\ldots)
+\pause
+
+\vspace{0.15cm}
+\textbf{El principio \emph{plug-in}} (Efron, 1979):
+\begin{itemize}\itemsep4pt
+  \item No podemos re-muestrear del mundo real; pero la muestra empírica es nuestra mejor estimación del mundo real.
+  \item Entonces: extraer $B$ \textbf{remuestras con reemplazo} de tamaño $n$ de la propia muestra; calcular el estadístico en cada una; la dispersión de esas $B$ réplicas estima su error estándar.
+\end{itemize}
+\[ \widehat{SE}(\hat{\theta}) \;=\; \sqrt{ \frac{1}{B-1} \sum_{b=1}^{B} \big( \hat{\theta}^{*b} - \bar{\theta}^{*} \big)^2 } \]
+\pause
+
+\begin{itemize}\itemsep3pt
+  \item Funciona para estadísticos donde \textbf{no hay fórmula} de error estándar.
+  \item En este curso lo usaremos dos veces más: \emph{bagging} (sesión 4) nace de remuestras bootstrap, y los intervalos de los \emph{causal forests} (sesión 6) también.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Bootstrap y el error out-of-bag}
+\small
+\textbf{Dato clave:} ¿qué fracción de las observaciones originales aparece en una remuestra bootstrap?
+\pause
+\[ P(i \in \text{remuestra}) \;=\; 1 - \left(1 - \frac{1}{n}\right)^{n} \;\xrightarrow[n \to \infty]{}\; 1 - e^{-1} \;\approx\; 0.632 \]
+\pause
+
+\begin{itemize}\itemsep5pt
+  \item Cada remuestra contiene $\approx 63.2\%$ de las observaciones; el $\approx 36.8\%$ restante queda \textbf{afuera} (\emph{out-of-bag}, OOB).
+  \item \textbf{Idea:} esas observaciones excluidas son datos de prueba \emph{gratis} para el modelo ajustado en esa remuestra.
+  \item \textbf{Error OOB:} predecir cada $i$ usando solo los modelos de las remuestras que \textbf{no} la contienen, y promediar.
+\end{itemize}
+\pause
+
+\vspace{0.2cm}
+\begin{block}{Anticipo}
+Guarden este número ($0.632$): en la sesión 4, el error OOB nos dará el error de prueba de un Random Forest \textbf{sin necesidad de CV}.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 2: SELECCIÓN DE MODELOS Y CRITERIOS
+%%#################################################
+%%#################################################
+\section{Selección de modelos y criterios de información}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{El problema de comparar modelos de distinto tamaño}
+\small
+\textbf{Pregunta previa:} ¿por qué no comparar modelos por su $R^2$ o su $\RSS$?
+\pause
+
+\vspace{0.1cm}
+\textcolor{gray}{Porque \textbf{siempre} mejoran al agregar variables --- son medidas de ajuste \emph{dentro} de muestra. Comparar un modelo de 3 variables con uno de 30 por $R^2$ es una carrera arreglada: gana el grande aunque las 27 extra sean ruido.}
+\pause
+
+\vspace{0.2cm}
+\textbf{Los enfoques clásicos de selección:}
+\begin{itemize}\itemsep5pt
+  \item \textbf{Best subset:} probar los $2^p$ modelos posibles. Con $p = 20$: un millón; con $p = 40$: $10^{12}$. Inviable rápido.
+  \item \textbf{Forward stepwise:} empezar vacío; agregar en cada paso la variable que más mejora. Solo $\approx p^2/2$ ajustes, pero \emph{greedy}: no garantiza el mejor subconjunto.
+  \item \textbf{Backward stepwise:} empezar completo e ir quitando (requiere $n > p$).
+\end{itemize}
+\pause
+
+\vspace{0.1cm}
+Y en todos los casos, la pregunta de fondo persiste: entre el mejor modelo de 3 variables y el mejor de 8, \textbf{¿cuál gana?} Necesitamos ajustar el optimismo del error de entrenamiento.
+\end{frame}
+
+%%=================================================
+\begin{frame}{Criterios de información: castigar la complejidad}
+\small
+\textbf{La idea común:} error de entrenamiento $+$ castigo por parámetro usado ($d$ = número de parámetros):
+\pause
+\[ C_p \;=\; \frac{1}{n}\big( \RSS + 2\,d\,\hat{\sigma}^2 \big) \]
+\[ \mathrm{BIC} \;=\; \frac{1}{n}\big( \RSS + \log(n)\,d\,\hat{\sigma}^2 \big) \]
+donde $\hat{\sigma}^2$ estima la varianza del error. (El AIC es proporcional a $C_p$ en el modelo lineal gaussiano.)
+\pause
+
+\vspace{0.2cm}
+\begin{itemize}\itemsep4pt
+  \item $C_p$/AIC: castigo $2$ por parámetro $\Rightarrow$ apunta a \textbf{predecir} bien.
+  \item BIC: castigo $\log(n) > 2$ para $n \geq 8$ $\Rightarrow$ elige modelos \textbf{más pequeños}; si existe un ``modelo verdadero'' esparso, lo recupera con $n$ grande (consistencia).
+  \item $R^2$ ajustado: el pariente informal; penaliza poco.
+\end{itemize}
+\pause
+
+\begin{block}{Intuición del castigo}
+Cada parámetro extra le ``roba'' al error de entrenamiento $\approx 2\hat{\sigma}^2/n$ de optimismo. Los criterios se lo devuelven.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Criterios o validación cruzada?}
+\small
+\begin{center}
+\footnotesize
+\begin{tabular}{lll}
+\hline
+ & Criterios ($C_p$, AIC, BIC) & Validación cruzada \\
+\hline
+Costo & un ajuste & $k$ ajustes \\
+Supuestos & modelo (aprox.) correcto, $\hat{\sigma}^2$ & casi ninguno \\
+¿Qué es $d$? & claro en modelos lineales & no lo necesita \\
+¿Aplica a RF, boosting, redes? & no ($d$ mal definido) & \textbf{sí} \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+
+\vspace{0.3cm}
+\begin{itemize}\itemsep5pt
+  \item Los criterios nacieron cuando ajustar un modelo era \textbf{caro}. Hoy el cómputo es barato y los métodos son flexibles: ¿cuántos ``parámetros'' tiene un Random Forest? Nadie sabe.
+  \item \textbf{Veredicto del curso:} CV por defecto para todo; criterios como referencia rápida en modelos lineales clásicos.
+\end{itemize}
+\pause
+
+\vspace{0.2cm}
+Hasta aquí, ``elegir modelo'' significó \textbf{elegir variables}: una decisión discreta, de todo o nada, e inestable. La regularización propone algo más elegante.
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 3: REGULARIZACIÓN
+%%#################################################
+%%#################################################
+\section{Regularización: Ridge, Lasso y Elastic Net}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cambio de filosofía: de seleccionar a encoger}
+\small
+\begin{itemize}\itemsep5pt
+  \item \textbf{Seleccionar} (subset/stepwise): cada variable está \emph{dentro o fuera}. Decisión discreta $\Rightarrow$ pequeñas perturbaciones de los datos cambian el modelo entero $\Rightarrow$ \textbf{varianza alta}. \pause
+  \item \textbf{Encoger} (\emph{shrinkage}): mantener todas las variables pero \textbf{empujar los coeficientes hacia cero} de forma continua y controlada. \pause
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{Formulación general:}
+\[ \hat{\beta} \;=\; \argmin_{\beta} \; \underbrace{\sum_{i=1}^n \big(y_i - x_i'\beta\big)^2}_{\text{ajuste}} \;+\; \lambda \cdot \underbrace{\mathcal{P}(\beta)}_{\text{penalización}} \]
+\pause
+
+\begin{itemize}\itemsep4pt
+  \item $\lambda \geq 0$: la \textbf{perilla continua} de complejidad. $\lambda = 0$: OLS. $\lambda \to \infty$: todos los coeficientes a 0.
+  \item $\lambda$ se elige por \textbf{validación cruzada} (por eso vimos CV primero).
+  \item Hoy: tres penalizaciones $\mathcal{P}$, tres estimadores.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Ridge: derivación de la solución cerrada}
+\small
+\textbf{Problema} (Hoerl \& Kennard, 1970):
+\[ \hat{\beta}^{R} \;=\; \argmin_{\beta} \; (\mathbf{y} - \mathbf{X}\beta)'(\mathbf{y} - \mathbf{X}\beta) + \lambda\, \beta'\beta \]
+\pause
+\textbf{1. Expandimos la función objetivo:}
+\[ S(\beta) = \mathbf{y}'\mathbf{y} - 2\beta'\mathbf{X}'\mathbf{y} + \beta'(\mathbf{X}'\mathbf{X})\beta + \lambda\,\beta'\beta \]
+\pause
+\textbf{2. Derivamos con respecto a $\beta$:}
+\[ \frac{\partial S(\beta)}{\partial \beta} = -2\mathbf{X}'\mathbf{y} + 2\mathbf{X}'\mathbf{X}\beta + 2\lambda\beta \]
+\pause
+\textbf{3. Igualamos a cero:}
+\[ (\mathbf{X}'\mathbf{X} + \lambda \mathbf{I})\,\beta = \mathbf{X}'\mathbf{y} \]
+\pause
+\textbf{4. Solución:}
+\[ \hat{\beta}^{R} \;=\; (\mathbf{X}'\mathbf{X} + \lambda \mathbf{I})^{-1}\,\mathbf{X}'\mathbf{y} \]
+\pause
+\begin{block}{Compárenla con OLS}
+$\hat{\beta}^{OLS} = (\mathbf{X}'\mathbf{X})^{-1}\mathbf{X}'\mathbf{y}$. La única diferencia: $\lambda$ sumado a la diagonal.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La magia de $\lambda\mathbf{I}$: estabilizar la inversa}
+\small
+\textbf{¿Recuerdan cuándo explota la varianza de OLS?} Cuando $\mathbf{X}'\mathbf{X}$ es (casi) singular: $p > n$, colinealidad, autovalores cercanos a cero.
+\pause
+
+\vspace{0.2cm}
+\begin{itemize}\itemsep5pt
+  \item Si $d_1 \geq \cdots \geq d_p \geq 0$ son los autovalores de $\mathbf{X}'\mathbf{X}$, los de $\mathbf{X}'\mathbf{X} + \lambda\mathbf{I}$ son $d_j + \lambda$: \textbf{todos positivos} para cualquier $\lambda > 0$.
+  \item $\Rightarrow$ la inversa \textbf{siempre existe} y está bien condicionada --- incluso con $p > n$.
+  \item Las direcciones problemáticas (autovalor pequeño = poca información en los datos) son las que más se encogen: Ridge ``desconfía'' donde los datos informan poco. \pause
+\end{itemize}
+
+\vspace{0.1cm}
+\textbf{Caso ortonormal} ($\mathbf{X}'\mathbf{X} = \mathbf{I}$): la fórmula se vuelve transparente:
+\[ \hat{\beta}^{R}_j \;=\; \frac{\hat{\beta}^{OLS}_j}{1 + \lambda} \]
+Encogimiento \textbf{proporcional}: todos los coeficientes se reducen en el mismo factor, y \textbf{ninguno llega exactamente a cero}.
+\pause
+
+\begin{block}{La promesa de la sesión 1, cumplida}
+$\hat{\beta}^{R}$ es \textbf{sesgado} hacia cero, pero su varianza es menor que la de OLS. Existe siempre un $\lambda > 0$ cuyo MSE de predicción \textbf{mejora} al de OLS.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Detalles que no son detalles: escala e intercepto}
+\small
+\begin{itemize}\itemsep6pt
+  \item \textbf{La penalización no es invariante a la escala:} $\sum_j \beta_j^2$ castiga igual al coeficiente de ``ingreso en pesos'' que al de ``edad en años'' --- pero sus magnitudes no son comparables. Si multiplico ingreso por 1000, su $\beta$ se divide por 1000 y casi no se penaliza. \pause
+  \item \textbf{Solución:} \textbf{estandarizar} los predictores (media 0, desviación 1) antes de regularizar. Así $\lambda$ trata a todos por igual. \pause
+  \item \textbf{El intercepto no se penaliza:} $\beta_0$ mide el nivel promedio de $y$, no la complejidad del modelo. Encogerlo sesgaría todas las predicciones hacia cero sin ganar nada. \pause
+  \item En la práctica, \texttt{glmnet} estandariza y excluye el intercepto \textbf{por defecto} --- pero hay que saber que lo hace, y que los coeficientes reportados vuelven a la escala original.
+\end{itemize}
+\pause
+
+\vspace{0.1cm}
+\begin{block}{Y el leakage otra vez}
+Las medias y desviaciones para estandarizar se calculan \textbf{con los datos de entrenamiento de cada fold}, no con toda la muestra (regla de oro \#3).
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Lasso: un valor absoluto que cambia todo}
+\small
+\textbf{Problema} (Tibshirani, 1996):
+\[ \hat{\beta}^{L} \;=\; \argmin_{\beta} \; \sum_{i=1}^n \big(y_i - x_i'\beta\big)^2 + \lambda \sum_{j=1}^p |\beta_j| \]
+\pause
+
+\begin{itemize}\itemsep5pt
+  \item El único cambio vs.\ Ridge: $|\beta_j|$ en lugar de $\beta_j^2$.
+  \item La consecuencia es enorme: para $\lambda$ suficientemente grande, algunos coeficientes son \textbf{exactamente cero}. \pause
+  \item El Lasso hace \textbf{dos trabajos a la vez}: encoge (control de varianza) \emph{y} selecciona variables (interpretabilidad, modelos esparsos).
+  \item No tiene solución cerrada (el valor absoluto no es diferenciable en 0) --- los algoritmos, en la sesión 3. \pause
+\end{itemize}
+
+\vspace{0.2cm}
+\begin{block}{¿Por qué el valor absoluto produce ceros exactos?}
+La respuesta está en la \textbf{geometría} de la restricción.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La geometría: por qué el Lasso anula y Ridge no}
+\small
+Forma equivalente (restringida): minimizar $\RSS$ sujeto a $\mathcal{P}(\beta) \leq t$.
+
+\begin{center}
+\begin{tikzpicture}[scale=0.76]
+% ---- Lasso panel ----
+\begin{scope}[shift={(0,0)}]
+  \draw[->] (-1.7,0) -- (2.9,0) node[right, font=\scriptsize] {$\beta_1$};
+  \draw[->] (0,-1.5) -- (0,2.6) node[above, font=\scriptsize] {$\beta_2$};
+  \draw[fill=blue!12, thick] (1.0,0) -- (0,1.0) -- (-1.0,0) -- (0,-1.0) -- cycle;
+  \fill (1.9,1.5) circle (2pt) node[right, font=\scriptsize] {$\hat{\beta}^{OLS}$};
+  \draw[red] (1.9,1.5) ellipse (0.5 and 0.3);
+  \draw[red] (1.9,1.5) ellipse (1.0 and 0.6);
+  \draw[red] (1.9,1.5) ellipse (1.58 and 0.95);
+  \fill[blue] (0,1.0) circle (2.6pt) node[above left, font=\scriptsize] {$\hat{\beta}^{L}$};
+  \node[font=\footnotesize] at (0.6,-1.9) {\textbf{Lasso:} $|\beta_1| + |\beta_2| \leq t$};
+\end{scope}
+% ---- Ridge panel ----
+\begin{scope}[shift={(6.3,0)}]
+  \draw[->] (-1.7,0) -- (2.9,0) node[right, font=\scriptsize] {$\beta_1$};
+  \draw[->] (0,-1.5) -- (0,2.6) node[above, font=\scriptsize] {$\beta_2$};
+  \draw[fill=blue!12, thick] (0,0) circle (1.0);
+  \fill (1.9,1.5) circle (2pt) node[right, font=\scriptsize] {$\hat{\beta}^{OLS}$};
+  \draw[red] (1.9,1.5) ellipse (0.5 and 0.3);
+  \draw[red] (1.9,1.5) ellipse (1.0 and 0.6);
+  \draw[red] (1.9,1.5) ellipse (1.45 and 0.87);
+  \fill[blue] (0.62,0.79) circle (2.6pt) node[above left, font=\scriptsize] {$\hat{\beta}^{R}$};
+  \node[font=\footnotesize] at (0.6,-1.9) {\textbf{Ridge:} $\beta_1^2 + \beta_2^2 \leq t$};
+\end{scope}
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep2pt
+  \item La solución: donde las curvas de nivel del $\RSS$ (elipses) \textbf{tocan} la región factible (azul).
+  \item El diamante tiene \textbf{esquinas sobre los ejes} ($\beta_j = 0$): las elipses suelen tocar ahí primero $\Rightarrow$ ceros exactos. El círculo \textbf{no tiene esquinas}: el contacto casi nunca cae en un eje.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Los tres umbrales, cara a cara}
+\small
+Con $\mathbf{X}$ ortonormal, los tres métodos transforman $\hat{\beta}^{OLS}_j$ así:
+
+\vspace{0.25cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.62]
+% Panel subset (hard)
+\begin{scope}[shift={(0,0)}]
+  \draw[->] (-2.3,0) -- (2.3,0); \draw[->] (0,-2.3) -- (0,2.3);
+  \draw[dashed, gray] (-2.1,-2.1) -- (2.1,2.1);
+  \draw[blue, very thick] (-2.1,-2.1) -- (-1,-1);
+  \draw[blue, very thick] (-1,0) -- (1,0);
+  \draw[blue, very thick] (1,1) -- (2.1,2.1);
+  \fill[blue] (-1,-1) circle (1.8pt); \fill[blue] (1,1) circle (1.8pt);
+  \node[font=\footnotesize] at (0,-2.85) {\textbf{Subset} (duro)};
+\end{scope}
+% Panel ridge
+\begin{scope}[shift={(6.2,0)}]
+  \draw[->] (-2.3,0) -- (2.3,0); \draw[->] (0,-2.3) -- (0,2.3);
+  \draw[dashed, gray] (-2.1,-2.1) -- (2.1,2.1);
+  \draw[blue, very thick] (-2.1,-1.24) -- (2.1,1.24);
+  \node[font=\footnotesize] at (0,-2.85) {\textbf{Ridge} ($\times \frac{1}{1+\lambda}$)};
+\end{scope}
+% Panel lasso (soft)
+\begin{scope}[shift={(12.4,0)}]
+  \draw[->] (-2.3,0) -- (2.3,0); \draw[->] (0,-2.3) -- (0,2.3);
+  \draw[dashed, gray] (-2.1,-2.1) -- (2.1,2.1);
+  \draw[blue, very thick] (-2.1,-1.1) -- (-1,0);
+  \draw[blue, very thick] (-1,0) -- (1,0);
+  \draw[blue, very thick] (1,0) -- (2.1,1.1);
+  \node[font=\footnotesize] at (0,-2.85) {\textbf{Lasso} (suave)};
+\end{scope}
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep3pt
+  \item \textbf{Subset} = umbral \textbf{duro}: conserva intactos los grandes, elimina los chicos (salto discontinuo: inestabilidad).
+  \item \textbf{Ridge} = encogimiento proporcional: nunca llega a cero.
+  \item \textbf{Lasso} = umbral \textbf{suave}: $\hat{\beta}^{L}_j = \mathrm{sign}(\hat{\beta}_j)\,(|\hat{\beta}_j| - \lambda)_{+}$ --- corre todo hacia cero y corta. Continuo \emph{y} esparso: lo mejor de los dos mundos.
+  \item La derivación formal de esta fórmula: sesión 3, vía condiciones KKT.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Ridge o Lasso? Depende de cómo sea el mundo}
+\small
+\begin{itemize}\itemsep6pt
+  \item \textbf{Mundo esparso} (pocos coeficientes grandes, el resto $\approx 0$): gana el \textbf{Lasso} --- recorta el ruido a cero y concentra la estimación donde hay señal. \pause
+  \item \textbf{Mundo denso} (muchos efectos pequeños repartidos): gana \textbf{Ridge} --- anular variables tira señal a la basura; mejor encoger todo un poco. \\ \textcolor{gray}{Ejemplo: predecir precios con cientos de micro-atributos que aportan poquito cada uno.} \pause
+  \item \textbf{Predictores muy correlacionados:} el Lasso tiende a elegir \textbf{uno} del grupo (casi al azar) y anular los demás $\Rightarrow$ el conjunto seleccionado es \textbf{inestable} entre muestras. Cuidado con sobreinterpretar ``las variables elegidas''. \pause
+\end{itemize}
+
+\vspace{0.1cm}
+\begin{block}{En la práctica}
+Nadie lo sabe \emph{a priori}: se prueban ambos (y Elastic Net) y \textbf{decide el CV}.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Elastic Net: lo mejor de ambos}
+\small
+\textbf{Problema} (Zou \& Hastie, 2005), en la parametrización de \texttt{glmnet}:
+\[ \hat{\beta}^{EN} = \argmin_{\beta} \; \frac{1}{2n}\sum_{i=1}^n \big(y_i - x_i'\beta\big)^2 + \lambda \left[ \alpha \sum_j |\beta_j| + \frac{1-\alpha}{2} \sum_j \beta_j^2 \right] \]
+\pause
+
+\begin{itemize}\itemsep5pt
+  \item $\alpha \in [0,1]$ interpola: $\alpha = 1$ Lasso puro, $\alpha = 0$ Ridge puro.
+  \item Hereda del L1 la \textbf{selección} (ceros exactos) y del L2 la \textbf{estabilidad} con correlación.
+  \item \textbf{Grouping effect:} predictores muy correlacionados tienden a entrar o salir \textbf{juntos}, con coeficientes similares --- en vez del sorteo arbitrario del Lasso. \pause
+  \item Dos hiperparámetros: $(\lambda, \alpha)$. En la práctica: CV sobre una grilla de ambos, o fijar $\alpha \in \{0.5, 1\}$ y CV sobre $\lambda$.
+\end{itemize}
+\pause
+
+\begin{block}{Regla mental}
+Ridge $=$ estabilidad; Lasso $=$ esparsidad; Elastic Net $=$ negociación entre las dos, con $\alpha$ como término del acuerdo.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{La lectura bayesiana: penalizar es tener un prior}
+\small
+Los tres estimadores son \textbf{modas posteriores} bajo distintos priors sobre $\beta$:
+\[ \hat{\beta}^{R}: \;\; \beta_j \sim N(0, \tau^2) \qquad\qquad
+   \hat{\beta}^{L}: \;\; \beta_j \sim \mathrm{Laplace}(0, b) \]
+\pause
+
+\begin{center}
+\begin{tikzpicture}[scale=0.85]
+  \draw[->] (-3.3,0) -- (3.3,0) node[right, font=\scriptsize] {$\beta_j$};
+  \draw[->] (0,0) -- (0,2.9);
+  % normal (escala y x5)
+  \draw[blue, very thick] plot[smooth] coordinates {(-3,0.02) (-2,0.27) (-1.5,0.65) (-1,1.21) (-0.5,1.76) (0,2.0) (0.5,1.76) (1,1.21) (1.5,0.65) (2,0.27) (3,0.02)};
+  % laplace (escala y x5), pico en (0,2.5)
+  \draw[red, very thick] plot[smooth] coordinates {(-3,0.12) (-2,0.34) (-1,0.92) (-0.5,1.52) (0,2.5)};
+  \draw[red, very thick] plot[smooth] coordinates {(0,2.5) (0.5,1.52) (1,0.92) (2,0.34) (3,0.12)};
+  \node[font=\scriptsize, blue] at (2.15,0.85) {Normal (Ridge)};
+  \node[font=\scriptsize, red] at (-2.15,1.3) {Laplace (Lasso)};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep3pt
+  \item El prior de Laplace es \textbf{picudo en cero}: apuesta a que muchos coeficientes son exactamente nulos $\Rightarrow$ la moda posterior produce ceros.
+  \item $\lambda$ traduce la \textbf{fuerza de la creencia}: regularizar fuerte $=$ prior concentrado en cero.
+  \item Mensaje: la penalización no es un truco numérico; es \textbf{información previa} sobre cómo creemos que es el mundo (``los efectos son pequeños/esparsos'').
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 4: EL PIPELINE HONESTO
+%%#################################################
+%%#################################################
+\section{El pipeline honesto}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Todo junto: el flujo de trabajo completo}
+\small
+\begin{center}
+\begin{tikzpicture}[node distance=0.55cm, every node/.style={font=\scriptsize}]
+  \node (datos) [draw, rounded corners, fill=gray!12, minimum height=0.75cm, text width=1.1cm, align=center] {Datos};
+  \node (train) [draw, rounded corners, fill=blue!10, right=0.45cm of datos, minimum height=0.75cm, text width=2.7cm, align=center] {\textbf{Entrenamiento} \\ CV interno: elegir $(\lambda, \alpha)$};
+  \node (refit) [draw, rounded corners, fill=blue!18, right=0.45cm of train, minimum height=0.75cm, text width=2.1cm, align=center] {Reajustar con todo el train en $\lambda^{*}$};
+  \node (test) [draw, rounded corners, fill=red!12, right=0.45cm of refit, minimum height=0.75cm, text width=1.7cm, align=center] {\textbf{Prueba}: evaluar \textbf{una} vez};
+  \draw[-{Stealth}, thick] (datos) -- (train);
+  \draw[-{Stealth}, thick] (train) -- (refit);
+  \draw[-{Stealth}, thick] (refit) -- (test);
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{enumerate}\itemsep4pt
+  \item \textbf{Separar prueba} al inicio y guardarla bajo llave.
+  \item Dentro del entrenamiento: \textbf{CV} (con estandarización y todo preprocesamiento \emph{dentro} de cada fold) para elegir hiperparámetros --- mínimo o regla 1-SE.
+  \item \textbf{Reajustar} el modelo ganador con todo el entrenamiento.
+  \item \textbf{Una sola} evaluación final en prueba: ese número se reporta.
+\end{enumerate}
+\pause
+
+\begin{block}{Este esqueleto no cambia más}
+Lo que cambia de aquí al final del curso es el \textbf{modelo del medio}: hoy \texttt{glmnet}; luego bosques, \emph{boosting}, redes. El pipeline es el mismo.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Leer un camino de regularización}
+\small
+La salida típica de \texttt{glmnet}: los coeficientes como función de $\lambda$.
+
+\vspace{0.2cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.80]
+  \draw[->] (0,-1.6) -- (0,2.7) node[above, font=\scriptsize] {$\hat{\beta}_j$};
+  \draw[->] (0,0) -- (7.6,0);
+  \node[font=\scriptsize] at (3.8,-1.85) {$\lambda$ decrece $\rightarrow$ (modelo más complejo)};
+  % coef 1: entra en x=1.0
+  \draw[blue, very thick] plot[smooth] coordinates {(1.0,0) (2.5,0.7) (4.0,1.3) (5.5,1.8) (7.0,2.2)};
+  % coef 2: entra en 2.4
+  \draw[red, very thick] plot[smooth] coordinates {(2.4,0) (3.5,0.5) (5.0,1.0) (7.0,1.5)};
+  % coef 3 (negativo): entra en 3.6
+  \draw[teal, very thick] plot[smooth] coordinates {(3.6,0) (4.6,-0.4) (5.8,-0.8) (7.0,-1.1)};
+  % coef 4: entra en 5.2
+  \draw[orange, very thick] plot[smooth] coordinates {(5.2,0) (6.1,0.3) (7.0,0.6)};
+  \draw[dashed, gray, thick] (3.0,-1.4) -- (3.0,2.4);
+  \node[font=\scriptsize, gray] at (3.0,2.62) {$\lambda_{1SE}$};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{itemize}\itemsep3pt
+  \item De izquierda ($\lambda$ grande: todo en cero) a derecha ($\lambda \to 0$: se acerca a OLS).
+  \item \textbf{El orden de entrada informa:} lo que entra primero es lo que más poder predictivo aporta.
+  \item En $\lambda_{1SE}$ (línea punteada) el modelo final usa \textbf{dos} variables: eso es lo que se reporta.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Recap}
+\small
+\begin{enumerate}\itemsep6pt
+  \item La \textbf{validación cruzada} estima el error de generalización reutilizando los datos: $k = 5$ o $10$ es el estándar; LOOCV tiene atajo solo en regresión lineal; con series de tiempo, folds hacia adelante.
+  \item \textbf{Regla de oro \#3:} el CV valida \emph{pipelines}, no modelos --- todo paso que use $y$ ocurre dentro de cada fold (la historia de los 5000 predictores).
+  \item El \textbf{bootstrap} estima incertidumbre remuestreando; deja $\approx 36.8\%$ afuera $\Rightarrow$ error \emph{out-of-bag}.
+  \item Los \textbf{criterios} ($C_p$, AIC, BIC) castigan la complejidad con supuestos; el CV lo hace sin ellos. Hoy: CV por defecto.
+  \item \textbf{Ridge} $= (\mathbf{X}'\mathbf{X} + \lambda\mathbf{I})^{-1}\mathbf{X}'\mathbf{y}$: estabiliza la inversa, encoge proporcionalmente, nunca anula. \textbf{Lasso}: el valor absoluto produce \textbf{ceros exactos} (geometría del diamante; umbral suave). \textbf{Elastic Net}: mezcla con \emph{grouping effect}.
+  \item Penalizar $=$ tener un \textbf{prior}: Normal (Ridge) o Laplace (Lasso).
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}
+\vspace{2.0cm}
+\Large{Preparación para la próxima clase\ldots}
+\end{frame}
+
+%%#################################################
+%%#################################################
+%% PARTE 5: PRÓXIMA CLASE
+%%#################################################
+%%#################################################
+
+%%=================================================
+\begin{frame}{Para aprovechar al máximo la próxima sesión}
+\small
+\textbf{Lecturas obligatorias de esta semana:}
+\begin{itemize}\itemsep4pt
+  \item ISLR, caps.\ 5 (secs.\ 5.1) y 6 (secs.\ 6.1--6.2). \\ \textcolor{gray}{Guía: validación cruzada, y la comparación Ridge/Lasso con sus figuras.}
+  \item Tibshirani (1996), \emph{Regression Shrinkage and Selection via the Lasso}. \\ \textcolor{gray}{Guía: secciones 1--3; el resto lo cubrimos la próxima semana.}
+\end{itemize}
+
+\textbf{Lecturas recomendadas:} ESL caps.\ 5 y 7 (selectivo); Zou \& Hastie (2005, Elastic Net).
+\pause
+
+\vspace{0.2cm}
+\textbf{Advertencia amistosa:} la próxima es la sesión de \textbf{mayor carga matemática} del curso: la teoría del Lasso --- condiciones KKT, subgradientes, \emph{coordinate descent}, y cuándo el Lasso recupera las variables verdaderas. Repasen el \textbf{Lagrangiano y las condiciones KKT} de sus cursos de optimización/micro.
+\pause
+
+\vspace{0.2cm}
+\textbf{Cierre de la próxima sesión:} el puente hacia la inferencia causal --- por qué usar el Lasso para \emph{seleccionar controles} requiere cuidado (\emph{post-double-selection}).
+\end{frame}
+
+%%=================================================
+%% Referencias
+\begin{frame}{Referencias esenciales}
+\footnotesize
+\begin{itemize}\itemsep2pt
+  \item James, G., Witten, D., Hastie, T., \& Tibshirani, R. (2021). \emph{An Introduction to Statistical Learning} (2.\ ed.). Springer. Caps.\ 5--6. [ISLR]
+  \item Hastie, T., Tibshirani, R., \& Friedman, J. (2009). \emph{The Elements of Statistical Learning} (2.\ ed.). Springer. Caps.\ 3, 5 y 7. [ESL]
+  \item Stone, M. (1974). Cross-Validatory Choice and Assessment of Statistical Predictions. \emph{JRSS-B}, 36(2), 111--147.
+  \item Efron, B. (1979). Bootstrap Methods: Another Look at the Jackknife. \emph{Annals of Statistics}, 7(1), 1--26.
+  \item Hoerl, A., \& Kennard, R. (1970). Ridge Regression: Biased Estimation for Nonorthogonal Problems. \emph{Technometrics}, 12(1), 55--67.
+  \item Tibshirani, R. (1996). Regression Shrinkage and Selection via the Lasso. \emph{JRSS-B}, 58(1), 267--288.
+  \item Zou, H., \& Hastie, T. (2005). Regularization and Variable Selection via the Elastic Net. \emph{JRSS-B}, 67(2), 301--320.
+  \item Friedman, J., Hastie, T., \& Tibshirani, R. (2010). Regularization Paths for Generalized Linear Models via Coordinate Descent. \emph{Journal of Statistical Software}, 33(1). [\texttt{glmnet}]
+\end{itemize}
+\normalsize
+\end{frame}
+
+%%=================================================
+%% End document
+\end{document}

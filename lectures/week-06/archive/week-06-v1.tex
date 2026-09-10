@@ -1,0 +1,438 @@
+\documentclass{beamer}
+
+%% Tema y configuraciones
+\usetheme{Boadilla}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=.,      % color de enlaces internos (índices, refs)
+    urlcolor=blue,    % color de URLs
+    citecolor=.,      % color de referencias bibliográficas
+}
+
+%% Helpers (macros y notación)
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\1}{\mathbb{I}}
+\newcommand{\MSE}{\mathrm{MSE}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+%% Encabezado
+\title[BDML]{Big Data y Machine Learning \\ para Economía Aplicada}
+\subtitle{Week 06: Machine Learning para Inferencia Causal}
+\author{Eduard F. Martinez Gonzalez, Ph.D.}
+\institute[]{Departamento de Economía, Universidad Icesi}
+\date{\today}
+
+%%=================================================
+%% Begin document
+\begin{document}
+
+%%=================================================
+%% Primer slide
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%=================================================
+\begin{frame}{Previously\ldots}
+\small
+Tres semillas sembradas en el curso, que hoy germinan juntas:
+\begin{itemize}\itemsep5pt
+  \item \textbf{S1:} predicción ($\hat{y}$) e inferencia causal ($\hat{\beta}$) son preguntas distintas\ldots\ pero prometimos que no eran rivales.
+  \item \textbf{S3:} el Lasso selecciona \emph{predictores}, no \emph{causas}; para un $\alpha$ creíble, \textbf{post-double-selection} --- y un nombre misterioso: \emph{ortogonalidad de Neyman}.
+  \item \textbf{S4--S5:} bosques y \emph{boosting} predicen de maravilla --- ``serán los motores dentro de un procedimiento causal''.
+\end{itemize}
+\pause
+
+\vspace{0.2cm}
+\begin{block}{Hoy: la predicción al servicio de $\beta$}
+\begin{enumerate}\itemsep2pt
+  \item \textbf{Double/debiased ML (DML):} efectos promedio con controles flexibles estimados por \emph{cualquier} método de ML.
+  \item \textbf{Causal forests:} efectos \textbf{heterogéneos} $\tau(x)$ con intervalos de confianza --- ¿a quién beneficia más el programa?
+\end{enumerate}
+La sesión que justifica el curso dentro de una maestría en economía.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 1: EL PROBLEMA Y EL MARCO
+%%#################################################
+%%#################################################
+\section{El problema y el marco}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{¿Dónde entra el ML en una pregunta causal?}
+\small
+\textbf{La identificación no cambia:} seguimos necesitando un diseño --- aquí, \emph{selección en observables} (unconfoundedness): condicional en $x$, el tratamiento es como aleatorio.
+\pause
+
+\vspace{0.15cm}
+\textbf{Lo que sí cambia:} las tareas \emph{internas} del análisis son problemas de \textbf{predicción}:
+\begin{itemize}\itemsep4pt
+  \item ¿Cómo controlar \textbf{flexiblemente} por $x$? (¿lineal? ¿cuadrático? ¿interacciones? --- es estimar $\E[y \mid x]$: predicción.)
+  \item ¿Cómo modelar la \textbf{propensión} al tratamiento $\E[d \mid x]$? (predicción.)
+  \item ¿\textbf{Quién} responde más al tratamiento? (predicción de efectos.)
+\end{itemize}
+\pause
+
+\vspace{0.15cm}
+\begin{block}{La división del trabajo}
+\textbf{El diseño identifica; el ML estima.} El ML no compra supuestos de identificación --- compra \emph{formas funcionales} que no hay que asumir.
+\end{block}
+\pause
+
+\vspace{0.1cm}
+El vehículo de toda la primera parte: el \textbf{modelo parcialmente lineal} (Robinson, 1988):
+\[ y \;=\; \alpha\, d \;+\; g(x) \;+\; \varepsilon, \qquad d \;=\; m(x) \;+\; v, \qquad \E[\varepsilon \mid x, d] = 0,\; \E[v \mid x] = 0 \]
+$\alpha$: el efecto que queremos. $g,\, m$: funciones \emph{molestas} (\emph{nuisance}) --- desconocidas, posiblemente complejísimas, perfectas para el ML.
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 2: DOUBLE/DEBIASED ML
+%%#################################################
+%%#################################################
+\section{Double/debiased machine learning (DML)}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{El intento ingenuo y sus dos pecados}
+\small
+\textbf{Tentación:} estimar $\hat{g}$ con un bosque (¡predice buenísimo!), y luego $\hat{\alpha}$ de la regresión de $y - \hat{g}(x)$ sobre $d$.
+\pause
+
+\vspace{0.2cm}
+\textbf{Pecado 1 --- sesgo de regularización.} Todo ML \emph{bueno} está regularizado: encoge, poda, suaviza (¡es la lección del curso!). Ese sesgo deliberado en $\hat{g}$ se transmite a $\hat{\alpha}$ \textbf{a primer orden}: el error $\hat{g} - g$ está correlacionado con $d$ (porque $d$ depende de $x$), y $\hat{\alpha}$ lo absorbe. La convergencia de $\hat{g}$ es más lenta que $\sqrt{n}$ $\Rightarrow$ $\hat{\alpha}$ hereda esa lentitud: adiós inferencia estándar.
+\pause
+
+\vspace{0.15cm}
+\textbf{Pecado 2 --- sobreajuste propio.} Si $\hat{g}$ se estima con \emph{los mismos datos} donde luego se estima $\alpha$, $\hat{g}$ absorbe parte del ruido $\varepsilon$ $\Rightarrow$ correlación mecánica entre $\hat{g}$ y los errores $\Rightarrow$ otro sesgo.
+\pause
+
+\vspace{0.15cm}
+\begin{block}{Las dos curas (una por pecado)}
+\begin{enumerate}\itemsep2pt
+  \item Contra el sesgo de regularización: \textbf{ortogonalidad de Neyman} (construir bien el momento).
+  \item Contra el sobreajuste: \textbf{cross-fitting} (nunca estimar nuisance y efecto con los mismos datos).
+\end{enumerate}
+DML $=$ exactamente estas dos ideas, formalizadas por Chernozhukov et al.\ (2018).
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cura 1: ortogonalidad de Neyman (vía un viejo amigo)}
+\small
+\textbf{¿Recuerdan Frisch--Waugh--Lovell?} En regresión lineal, $\hat{\alpha}$ se obtiene regresando \emph{residuos sobre residuos}. La versión DML hace lo mismo con ML:
+\pause
+\begin{enumerate}\itemsep3pt
+  \item Predecir $y$ desde $x$: $\hat{\ell}(x) \approx \E[y \mid x]$. Residuo: $\tilde{y} = y - \hat{\ell}(x)$.
+  \item Predecir $d$ desde $x$: $\hat{m}(x) \approx \E[d \mid x]$. Residuo: $\tilde{d} = d - \hat{m}(x)$.
+  \item Regresar $\tilde{y}$ sobre $\tilde{d}$ por OLS $\Rightarrow \hat{\alpha}$.
+\end{enumerate}
+\pause
+
+\textbf{¿Por qué esto es ``ortogonal''?} El momento $\E[(\tilde{y} - \alpha \tilde{d})\,\tilde{d}] = 0$ tiene una propiedad mágica: su \textbf{derivada respecto a los nuisances $(\ell, m)$, evaluada en los verdaderos, es cero}.
+\begin{itemize}\itemsep3pt
+  \item Errores de \emph{primer orden} en $\hat{\ell}$ y $\hat{m}$ \textbf{no mueven} el momento; solo entran \emph{productos} de errores (segundo orden).
+  \item Es la ``inmunización'' del PDS de la sesión 3 --- ahora con cualquier ML en los pasos 1--2, no solo Lasso. \pause
+\end{itemize}
+
+\begin{block}{Contraste con el ingenuo}
+El ingenuo usa el momento equivocado (solo residualiza $y$): su derivada respecto a $g$ \textbf{no} es cero, y el sesgo de regularización entra directo. \textbf{Residualizar también el tratamiento} es lo que inmuniza --- ``double''.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cura 2: cross-fitting}
+\small
+Falta el pecado 2: no usar las mismas observaciones para aprender los nuisances y para estimar $\alpha$.
+
+\vspace{0.2cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.72]
+\foreach \row in {0,1,2,3,4} {
+  \node[font=\scriptsize] at (-1.35,-0.72*\row+0.28) {Ronda \the\numexpr\row+1\relax};
+  \foreach \col in {0,1,2,3,4} {
+    \ifnum\col=\row
+      \draw[fill=red!18] (1.3*\col,-0.72*\row) rectangle (1.3*\col+1.2,-0.72*\row+0.56);
+    \else
+      \draw[fill=blue!10] (1.3*\col,-0.72*\row) rectangle (1.3*\col+1.2,-0.72*\row+0.56);
+    \fi
+  }
+}
+\node[font=\scriptsize, fill=blue!10, draw] at (8.35,-0.35) {estimar $\hat{\ell}, \hat{m}$};
+\node[font=\scriptsize, fill=red!18, draw] at (8.35,-1.25) {evaluar residuos};
+\end{tikzpicture}
+\end{center}
+\pause
+
+\begin{enumerate}\itemsep4pt
+  \item Partir la muestra en $K$ folds (como en CV --- la sesión 2, reciclada para inferencia).
+  \item Para cada fold $k$: estimar $\hat{\ell}, \hat{m}$ con los \textbf{otros} $K-1$ folds; calcular los residuos $\tilde{y}, \tilde{d}$ \textbf{en el fold $k$}.
+  \item Con todos los residuos (cada uno ``out-of-fold''), correr la regresión final y los SE de siempre.
+\end{enumerate}
+\pause
+
+\begin{itemize}\itemsep2pt
+  \item Cada observación es evaluada por modelos que \textbf{nunca la vieron} $\Rightarrow$ muere la correlación mecánica del sobreajuste, sin sacrificar datos.
+\end{itemize}
+\end{frame}
+
+%%=================================================
+\begin{frame}{El resultado central del DML}
+\small
+\textbf{Teorema (informal; Chernozhukov, Chetverikov, Demirer, Duflo, Hansen, Newey \& Robins, 2018).} Con (i) momento ortogonal, (ii) cross-fitting, y (iii) nuisances estimados con error que se encoge más rápido que $n^{-1/4}$:
+\[ \sqrt{n}\,\big( \hat{\alpha} - \alpha \big) \;\longrightarrow\; N(0, \sigma_\alpha^2) \]
+y los intervalos de confianza usuales son válidos.
+\pause
+
+\vspace{0.2cm}
+\textbf{Por qué es un resultado hermoso:}
+\begin{itemize}\itemsep5pt
+  \item $n^{-1/4}$ es una vara \textbf{baja}: Lasso, bosques, \emph{boosting} y redes la alcanzan bajo condiciones razonables (sparsity aproximada, suavidad\ldots).
+  \item Es decir: \textbf{predictores mediocres bastan para inferencia de primera} --- la ortogonalidad convierte errores de tamaño $n^{-1/4}$ en sesgos de tamaño $n^{-1/2}$ (productos), justo lo tolerable. \pause
+  \item Y es \textbf{agnóstico}: el ``mejor ML para los nuisances'' se elige por CV como siempre; la teoría no exige uno en particular. La receta general admite también ATE con propensity (AIPW), IV parcialmente lineal, y más.
+\end{itemize}
+\pause
+
+\begin{block}{En R}
+\texttt{DoubleML} (Bach et al.) sobre \texttt{mlr3}, o \texttt{hdm} para las versiones Lasso. La aplicación de esta semana usa la primera.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Lo que el DML no hace}
+\small
+\begin{itemize}\itemsep6pt
+  \item \textbf{No compra identificación.} Todo lo anterior asume \emph{unconfoundedness}: los confusores relevantes están \textbf{en} $x$. Si hay selección en no observables, el DML estima con elegancia asintótica\ldots\ un parámetro sesgado. El diseño (¡su curso de causal!) va primero. \pause
+  \item \textbf{No sustituye el sentido común sobre $x$.} Meter \emph{malos controles} (mediadores, colliders --- ¡semana 1 de ECO-60116!) sigue siendo un error: el ML los usará con entusiasmo. \pause
+  \item \textbf{No es magia de muestras chicas.} Es un resultado asintótico; con $n$ pequeño y señal débil, los IC son honestos pero anchos. \pause
+\end{itemize}
+
+\vspace{0.15cm}
+\begin{block}{El mantra de la sesión}
+El ML resuelve la \textbf{forma funcional}; el economista resuelve la \textbf{identificación}. En ese orden de importancia.
+\end{block}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 3: EFECTOS HETEROGÉNEOS Y CAUSAL FORESTS
+%%#################################################
+%%#################################################
+\section{Efectos heterogéneos: causal forests}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{De $\alpha$ promedio a $\tau(x)$: la pregunta de focalización}
+\small
+El DML entrega un \textbf{promedio}. Pero la política pública casi siempre pregunta más:
+\[ \tau(x) \;=\; \E\big[ Y(1) - Y(0) \mid X = x \big] \]
+el efecto \textbf{condicional} (CATE): ¿para quién funciona el programa?
+\pause
+
+\begin{itemize}\itemsep4pt
+  \item ¿La transferencia sube más la asistencia escolar en hogares rurales? ¿El subsidio al empleo sirve solo a los jóvenes? $\Rightarrow$ \textbf{focalizar} con presupuesto limitado.
+\end{itemize}
+\pause
+
+\vspace{0.15cm}
+\textbf{¿Y por qué no interacciones a mano} ($d \times$ mujer, $d \times$ rural, \ldots)?
+\begin{itemize}\itemsep4pt
+  \item Con muchas $x$, las interacciones candidatas explotan (¡alta dimensión, sesión 3!).
+  \item Probar docenas y reportar la significativa $=$ \emph{data snooping}: garantía de falsos positivos.
+  \item Y la heterogeneidad real puede ser no lineal o de combinaciones (rural $\times$ joven $\times$ sin acceso a crédito). \pause
+\end{itemize}
+
+\begin{block}{La idea}
+Dejar que un \textbf{método flexible} busque la heterogeneidad --- pero con las protecciones estadísticas que la búsqueda exige. Ese método será\ldots\ un bosque, claro.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Por qué un árbol ``normal'' falla para $\tau(x)$}
+\small
+\textbf{Dos obstáculos, uno conceptual y uno estadístico:}
+\pause
+\begin{enumerate}\itemsep6pt
+  \item \textbf{El objetivo equivocado.} CART parte el espacio para predecir \textbf{$y$}. Pero heterogeneidad en \emph{niveles} de $y$ $\neq$ heterogeneidad en \emph{efectos}: un grupo puede tener $y$ altísimo y efecto cero. Hay que partir buscando donde \textbf{cambia $\tau$}, no donde cambia $y$. \pause
+  \item \textbf{Sobreajuste adaptativo.} Si las \emph{mismas} observaciones eligen los cortes \textbf{y} estiman el efecto en cada hoja, los cortes ``persiguen'' fluctuaciones del ruido y los efectos por hoja quedan \textbf{sesgados} hacia la heterogeneidad espuria encontrada. Es el pecado 2 del DML en versión árbol. \pause
+\end{enumerate}
+
+\vspace{0.15cm}
+\begin{block}{La cura: honestidad (Athey \& Imbens, 2016)}
+Partir la muestra del árbol en dos mitades: una elige los \textbf{cortes}, la otra --- que los cortes nunca vieron --- estima los \textbf{efectos} en las hojas. Predicción y estimación, divorciadas dentro de cada árbol. (¿Les suena? Es cross-fitting en miniatura.)
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Causal forest (Wager \& Athey, 2018; Athey, Tibshirani \& Wager, 2019)}
+\small
+\textbf{La receta completa:}
+\begin{enumerate}\itemsep4pt
+  \item \textbf{Ortogonalizar primero} (¡el DML por dentro!): residualizar $y$ y $d$ contra $x$ con bosques auxiliares y cross-fitting.
+  \item Crecer muchos \textbf{árboles causales honestos} sobre los residuos, con cortes que maximizan la heterogeneidad de $\tau$ entre hijos (y las dosis de aleatoriedad del RF: bootstrap $+$ $m$ candidatos).
+  \item $\hat{\tau}(x)$: agregación de los árboles --- formalmente, un \textbf{promedio ponderado por vecindad adaptativa}: los árboles definen quiénes son ``vecinos relevantes'' de $x$ para el efecto.
+\end{enumerate}
+\pause
+
+\vspace{0.15cm}
+\textbf{Lo que se gana con toda esta disciplina:}
+\begin{itemize}\itemsep4pt
+  \item $\hat{\tau}(x)$ es \textbf{consistente y asintóticamente normal}, con errores estándar estimables $\Rightarrow$ \textbf{intervalos de confianza para el efecto de cada quien}.
+  \item Un objeto que ningún método del curso había dado: inferencia \emph{puntual} sobre una función de efectos. \pause
+\end{itemize}
+
+\begin{block}{Supuestos, siempre los supuestos}
+Sigue siendo selección en observables ($+$ \emph{overlap}: nadie con propensión 0 o 1). La honestidad protege de la heterogeneidad espuria; \textbf{no} de la mala identificación.
+\end{block}
+\end{frame}
+
+%%=================================================
+\begin{frame}{Cómo se lee (y cómo no) un causal forest}
+\small
+\textbf{El flujo de análisis con \texttt{grf} en R:}
+\begin{enumerate}\itemsep3pt
+  \item \texttt{cf <- causal\_forest(X, Y, W)} \quad ($W$ = tratamiento); $\hat{\tau}(x)$ e IC con \texttt{predict(cf, estimate.variance = TRUE)}.
+  \item \textbf{ATE primero:} \texttt{average\_treatment\_effect(cf)} --- el promedio, con la maquinaria DML.
+  \item \textbf{¿Hay heterogeneidad de verdad?} \texttt{test\_calibration(cf)}: un test global antes de emocionarse con el histograma de $\hat{\tau}$.
+  \item \textbf{¿Quién?} Efectos promedio por cuartiles de $\hat{\tau}$, \emph{best linear projection} sobre covariables interpretables.
+\end{enumerate}
+\pause
+
+\vspace{0.15cm}
+\textbf{Las trampas de lectura:}
+\begin{itemize}\itemsep4pt
+  \item La dispersión del histograma de $\hat{\tau}(x)$ \textbf{no} es evidencia de heterogeneidad (mezcla señal y ruido): por eso el test primero.
+  \item Las variables que ``explican'' $\tau$ son \textbf{descriptivas} (¡proxies, sesión 3!): útiles para focalizar, no para mecanismos.
+  \item Con señal débil, IC individuales anchos: honestidad $\neq$ precisión gratis.
+  \item Modelo a imitar en sus proyectos: Davis \& Heller (2017, AER P\&P) --- \emph{causal forests} sobre un programa de empleo juvenil, corta y clara.
+\end{itemize}
+\end{frame}
+
+
+%%#################################################
+%%#################################################
+%% PARTE 4: EL MAPA COMPLETO
+%%#################################################
+%%#################################################
+\section{El mapa del economista aumentado}
+\begin{frame}[noframenumbering]
+\tableofcontents[currentsection]
+\end{frame}
+
+%%=================================================
+\begin{frame}{Qué herramienta para qué pregunta}
+\small
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lll}
+\hline
+Pregunta & Herramienta & Sesión \\
+\hline
+¿Qué valor tomará $y$? (predicción pura) & regularización, RF, boosting & 2--5 \\
+Efecto promedio, pocos controles & OLS / su curso de causal & --- \\
+Efecto promedio, \textbf{muchos} controles & PDS / \textbf{DML} & 3, 6 \\
+¿\textbf{Para quién} funciona? (CATE, focalización) & \textbf{causal forest} & 6 \\
+¿A quién tratar con presupuesto fijo? & \emph{policy learning} sobre $\hat{\tau}$ & (lectura) \\
+\hline
+\end{tabular}
+\end{center}
+\pause
+
+\vspace{0.25cm}
+\textbf{Las tres reglas que ordenan todo:}
+\begin{enumerate}\itemsep4pt
+  \item \textbf{Identificación antes que estimación:} el diseño no se delega al algoritmo.
+  \item \textbf{Ortogonalizar y separar muestras} siempre que un objeto estimado entre en otra estimación (Neyman $+$ cross-fitting/honestidad).
+  \item \textbf{La heterogeneidad se testea antes de interpretarse.}
+\end{enumerate}
+\pause
+
+\vspace{0.1cm}
+Con esto cierra el bloque supervisado-causal del curso: lo que sigue (S7--S9) explora datos \textbf{sin} etiqueta y datos \textbf{no estructurados}.
+\end{frame}
+
+%%=================================================
+\begin{frame}{Recap}
+\small
+\begin{enumerate}\itemsep6pt
+  \item En una pregunta causal, el ML estima las piezas \textbf{predictivas} ($\E[y|x]$, $\E[d|x]$, $\tau(x)$); la \textbf{identificación} sigue siendo del economista.
+  \item El plug-in ingenuo peca dos veces: \textbf{sesgo de regularización} y \textbf{sobreajuste}. Las curas: momento \textbf{ortogonal} (residuos sobre residuos, FWL generalizado) y \textbf{cross-fitting}.
+  \item \textbf{DML}: con nuisances a tasa $n^{-1/4}$, $\hat{\alpha}$ es $\sqrt{n}$-normal e IC válidos --- predictores mediocres bastan para inferencia de primera.
+  \item \textbf{Causal forests}: árboles que parten donde cambia $\tau$, \textbf{honestos} (cortes y efectos con mitades distintas), ortogonalizados por dentro $\Rightarrow$ $\hat{\tau}(x)$ con intervalos de confianza.
+  \item Leer con disciplina: test global de heterogeneidad primero; los drivers de $\tau$ son proxies para \textbf{focalizar}, no mecanismos.
+\end{enumerate}
+\end{frame}
+
+%%=================================================
+\begin{frame}
+\vspace{2.0cm}
+\Large{Preparación para la próxima clase\ldots}
+\end{frame}
+
+%%#################################################
+%%#################################################
+%% PARTE 5: PRÓXIMA CLASE
+%%#################################################
+%%#################################################
+
+%%=================================================
+\begin{frame}{Para aprovechar al máximo la próxima sesión}
+\small
+\textbf{Lecturas obligatorias de esta semana:}
+\begin{itemize}\itemsep4pt
+  \item Athey \& Imbens (2019), \emph{Machine Learning Methods That Economists Should Know About}, Annual Review of Economics. \\ \textcolor{gray}{Guía: ahora sí, lectura completa --- es el mapa de la sesión de hoy.}
+  \item Chernozhukov et al.\ (2018), \emph{Double/Debiased Machine Learning}, secciones 1--2. \\ \textcolor{gray}{Guía: no se pierdan en la notación; busquen ortogonalidad y cross-fitting.}
+\end{itemize}
+
+\textbf{Recomendadas:} Wager \& Athey (2018); Davis \& Heller (2017); Belloni et al.\ (2014, JEP) para repasar.
+\pause
+
+\vspace{0.2cm}
+\textbf{Próxima sesión --- soltamos la $y$:} aprendizaje \textbf{no supervisado}. Clustering ($k$-means, jerárquico) y reducción de dimensión (PCA y amigos): segmentar consumidores y construir índices socioeconómicos sin variable de respuesta. Lectura previa: ISLR cap.\ 12 (secs.\ 12.1--12.2 y 12.4).
+\pause
+
+\vspace{0.2cm}
+\textbf{Aplicación de esta semana en R:} heterogeneidad del efecto de un programa social con \texttt{grf}: del ATE al CATE, test de calibración y efectos por cuartiles.
+\end{frame}
+
+%%=================================================
+%% Referencias
+\begin{frame}{Referencias esenciales}
+\footnotesize
+\begin{itemize}\itemsep2pt
+  \item Robinson, P. (1988). Root-N-Consistent Semiparametric Regression. \emph{Econometrica}, 56(4), 931--954.
+  \item Belloni, A., Chernozhukov, V., \& Hansen, C. (2014). High-Dimensional Methods and Inference on Structural and Treatment Effects. \emph{JEP}, 28(2), 29--50.
+  \item Athey, S., \& Imbens, G. (2016). Recursive Partitioning for Heterogeneous Causal Effects. \emph{PNAS}, 113(27), 7353--7360.
+  \item Chernozhukov, V., Chetverikov, D., Demirer, M., Duflo, E., Hansen, C., Newey, W., \& Robins, J. (2018). Double/Debiased Machine Learning for Treatment and Structural Parameters. \emph{Econometrics Journal}, 21(1), C1--C68.
+  \item Wager, S., \& Athey, S. (2018). Estimation and Inference of Heterogeneous Treatment Effects using Random Forests. \emph{JASA}, 113(523), 1228--1242.
+  \item Athey, S., Tibshirani, J., \& Wager, S. (2019). Generalized Random Forests. \emph{Annals of Statistics}, 47(2), 1148--1178.
+  \item Athey, S., \& Imbens, G. (2019). Machine Learning Methods That Economists Should Know About. \emph{Annual Review of Economics}, 11, 685--725.
+  \item Davis, J., \& Heller, S. (2017). Using Causal Forests to Predict Treatment Heterogeneity: An Application to Summer Jobs. \emph{AER P\&P}, 107(5), 546--550.
+  \item Bach, P., Chernozhukov, V., Kurz, M., \& Spindler, M. (2022). DoubleML: An Object-Oriented Implementation of Double Machine Learning in R. \emph{JMLR} / CRAN.
+\end{itemize}
+\normalsize
+\end{frame}
+
+%%=================================================
+%% End document
+\end{document}
