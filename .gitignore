@@ -1,4 +1,21 @@
+# R
 .Rproj.user
 .Rhistory
 .RData
 .Ruserdata
+
+# Subproductos de LaTeX
+*.aux
+*.log
+*.nav
+*.out
+*.snm
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+# OS
+.DS_Store
+**/.DS_Store
+Thumbs.db
