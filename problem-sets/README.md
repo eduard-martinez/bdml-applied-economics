@@ -38,10 +38,10 @@ Entregable: un único `.pdf` y un repositorio o `.zip` con un script maestro `00
 
 | Taller | Se publica | Se entrega |
 |---|---|---|
-| PS1 | Sesión 3 | Antes de la sesión 6 |
-| PS2 | Sesión 7 | Antes de la sesión 9 |
+| PS1 | Sesión 3, martes 29 de septiembre de 2026 | Martes 20 de octubre de 2026, antes de clase (sesión 6) |
+| PS2 | Sesión 7, martes 27 de octubre de 2026 | Martes 17 de noviembre de 2026 |
 
-Las fechas exactas se fijan con el calendario académico del período.
+El PS2 se entrega una semana después de la última sesión (10 de noviembre), dentro del período de exámenes finales del calendario académico 2026-2 (17 al 28 de noviembre), para que pueda cubrir el material de la sesión 9.
 
 ## Estado
 
