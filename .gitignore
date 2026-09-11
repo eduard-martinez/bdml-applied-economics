@@ -1,8 +1,10 @@
 # R
 .Rproj.user
+**/.Rproj.user
 .Rhistory
 .RData
 .Ruserdata
+*.Rproj
 
 # Subproductos de LaTeX
 *.aux
@@ -11,11 +13,29 @@
 *.out
 *.snm
 *.toc
+*.vrb
+*.bbl
+*.blg
 *.synctex.gz
 *.fls
 *.fdb_latexmk
+*.gz
+
+# Fuentes LaTeX: el repositorio público sólo lleva los PDF finales (misma convención que el
+# repositorio de Inferencia Causal). El syllabus es la excepción.
+*.tex
+!syllabus/syllabus.tex
+
+# Versiones anteriores de los decks: se conservan localmente (Dropbox), no en GitHub
+lectures/**/archive/
+
+# Borradores locales de problem sets; los enunciados finales se publican en PDF
+problem-sets/**/borrador/
 
 # OS
 .DS_Store
 **/.DS_Store
 Thumbs.db
+
+# Claude Code
+.claude/settings.local.json
