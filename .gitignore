@@ -35,6 +35,7 @@ problem-sets/**/borrador/
 # Generadores de datos simulados de las aplicaciones (00_*.R): se corren localmente y nunca se publican;
 # en GitHub solo van los datos que producen (input/)
 applications/**/00_*.R
+gen_data/
 
 # OS
 .DS_Store
