@@ -32,6 +32,10 @@ lectures/**/archive/
 # Borradores locales de problem sets; los enunciados finales se publican en PDF
 problem-sets/**/borrador/
 
+# Generadores de datos simulados de las aplicaciones (00_*.R): se corren localmente y nunca se publican;
+# en GitHub solo van los datos que producen (input/)
+applications/**/00_*.R
+
 # OS
 .DS_Store
 **/.DS_Store
