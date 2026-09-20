@@ -1,0 +1,31 @@
+variable,definicion
+puesto,identificador del puesto de votacion
+nombre,"nombre del puesto (colegio, escuela, ...)"
+departamento,departamento
+municipio,municipio
+cod_municipio,codigo DANE del municipio
+zona,cabecera municipal o zona rural
+lon,longitud
+lat,latitud
+registrados,ciudadanos habilitados para votar en el puesto
+votos_petro,votos por Petro en la segunda vuelta de 2022
+votos_hernandez,votos por Hernandez en la segunda vuelta de 2022
+votos_blancos,votos en blanco
+votos_nulos,votos nulos
+votos_total,"votos depositados (candidatos, blancos, nulos y no marcados)"
+voto_petro,"votos por Petro sobre votos por los dos candidatos, en puntos porcentuales"
+gana_petro,1 si Petro obtuvo mas votos que Hernandez en el puesto
+participacion,"votos depositados sobre registrados, en puntos porcentuales"
+voto_petro_2018,voto por Petro en el mismo puesto en la segunda vuelta de 2018 (faltante si el puesto no existia)
+poblacion,personas en las manzanas del entorno del puesto (censo 2018)
+viviendas,viviendas en el entorno (censo 2018)
+estrato_bajo,"viviendas de estrato 1 o 2 sobre viviendas, en %"
+estrato_medio,"viviendas de estrato 3 o 4, en %"
+estrato_alto,"viviendas de estrato 5 o 6, en %"
+educ_superior,"personas con educacion superior sobre personas con nivel educativo conocido, en %"
+servicios,"servicios por vivienda (agua, alcantarillado, energia, gas e internet: de 0 a 5)"
+edad_0_19 ... edad_75,"personas de cada grupo de edad sobre personas, en %"
+mujeres,"mujeres sobre personas, en %"
+afro,"personas afrocolombianas sobre personas con etnia conocida, en %"
+indigena,"personas indigenas sobre personas con etnia conocida, en %"
+muestra,"entrenamiento (80%) o prueba (20%), fija para todo el curso"

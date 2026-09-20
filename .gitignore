@@ -37,6 +37,9 @@ problem-sets/**/borrador/
 applications/**/00_*.R
 gen_data/
 
+# PDF de la bibliografia organizados por sesion (literature/papers/): uso interno del curso, no se publican
+literature/papers/
+
 # OS
 .DS_Store
 **/.DS_Store
