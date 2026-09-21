@@ -1,0 +1,13 @@
+variable,descripcion
+id,identificador del aviso
+tipo,Casa o Apartamento
+area,area en metros cuadrados (construida; total si falta)
+habitaciones,numero de habitaciones (faltante en parte de los avisos)
+banos,numero de banos
+barrio,barrio reportado en el aviso (faltante en la mayoria)
+lon,longitud
+lat,latitud
+anio,anio de publicacion del aviso (2019 o 2020)
+precio,precio de venta en millones de pesos; NA en la prueba
+vis,1 si el precio es de vivienda de interes social (hasta 135 SMMLV del anio); NA en la prueba
+muestra,particion fija: entrenamiento o prueba (no se cambia)
