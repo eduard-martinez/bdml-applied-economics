@@ -1,182 +1,161 @@
-##============================================================================##
-# week-02.R  —  La regresión lineal como máquina de predecir
-#------------------------------------------------------------------------------#
-# El caso del curso: ¿cuánto del voto de un puesto de votación se puede
-# predecir con el censo de su entorno? Segunda vuelta de 2022, Petro vs.
-# Hernández; Cali, Palmira, Yumbo y Jamundí. El guion de la práctica:
-#   1. los datos y la partición entrenamiento/prueba (semilla 2026)
-#   2. la referencia (la media) y la recta con una variable, con su RMSE
-#   3. los residuos de la recta: contra el ajustado, por municipio, en el mapa
-#   4. varios modelos con más variables, todos contra la misma prueba
-#   5. el mejor modelo y sus predicciones
-# La base se lee directo del repositorio del curso en GitHub: no hay que
-# descargar nada.
-##============================================================================##
+## Big Data y Machine Learning para Economia Aplicada
+## week-02: la regresion lineal como maquina de predecir
+## Last run: Sep 22, 2026
 
-## configuracion inicial
-rm(list = ls())
-if (!require(pacman)) install.packages("pacman")
-pacman::p_load(rio, dplyr)
+##==: 0. initial setup :==##
 
-## las tres metricas del curso
-rmse <- function(y, yhat) sqrt(mean((y - yhat)^2))
-mae <- function(y, yhat) mean(abs(y - yhat))
-r2_prueba <- function(y, yhat, y_train) 1 - sum((y - yhat)^2) / sum((y - mean(y_train))^2)
+## clean environment
+rm(list=ls())
 
-## promedio de los k puestos mas cercanos en el mapa (se usa en la seccion 4)
-knn_reg <- function(coord_train, y_train, coord_nueva, k) {
-           prediccion <- rep(NA, nrow(coord_nueva))
-           for (i in 1:nrow(coord_nueva)) {
-             distancia <- sqrt((coord_train[, 1] - coord_nueva[i, 1])^2 + (coord_train[, 2] - coord_nueva[i, 2])^2)
-             vecinos <- order(distancia)[1:k]
-             prediccion[i] <- mean(y_train[vecinos])
+## load/install packages
+require(pacman)
+p_load(rio , dplyr)
+
+##==: 1. prepare data :==##
+
+## 1.1. load data (la base publica del curso, directo desde github)
+url <- "https://raw.githubusercontent.com/eduard-martinez/bdml-applied-economics/main/applications/week-02/input/puestos_valle_2022.rds"
+db <- import(url , trust=T)
+
+## 1.2. subset data: cali y su area metropolitana
+df <- db %>%
+      subset(municipio %in% c("CALI","PALMIRA","YUMBO","JAMUNDI")) %>%
+      mutate(log_registrados = log(registrados))
+nrow(df)
+
+## 1.3. split data (la particion de la clase: semilla 2026, 25% a la prueba)
+set.seed(2026)
+sample <- sample(x = nrow(df) , round(nrow(df)*0.25))
+test <- df[sample,]
+train <- df[-sample,]
+
+##==: 2. baseline: la media del target :==##
+
+## 2.1. target predicho: la media del train para todos
+test$voto_pred <- mean(train$voto_petro)
+
+## 2.2. comparar target original vs target predicho
+test %>% select(nombre , municipio , voto_petro , voto_pred) %>% head(5)
+
+## 2.3. rmse en train y test
+rmse_train_media <- sqrt(mean((train$voto_petro - mean(train$voto_petro))^2))
+rmse_test_media <- sqrt(mean((test$voto_petro - test$voto_pred)^2))
+c(train = rmse_train_media , test = rmse_test_media)
+
+##==: 3. regresion simple :==##
+
+## 3.1. estimar el modelo: voto contra educacion superior
+modelo_simple <- lm(voto_petro ~ educ_superior , data=train)
+summary(modelo_simple)
+
+## 3.2. la nube y la recta
+plot(train$educ_superior , train$voto_petro , pch=16 , col="gray50",
+     xlab="educacion superior (%)" , ylab="voto por petro (%)")
+abline(modelo_simple , col="blue" , lwd=2)
+
+## 3.3. target predicho vs target original
+test$voto_pred <- predict(modelo_simple , test)
+test %>% select(nombre , municipio , voto_petro , voto_pred) %>% head(5)
+
+## 3.4. rmse en train y test
+rmse_train_simple <- sqrt(mean((train$voto_petro - predict(modelo_simple , train))^2))
+rmse_test_simple <- sqrt(mean((test$voto_petro - test$voto_pred)^2))
+c(train = rmse_train_simple , test = rmse_test_simple)
+
+##==: 4. k-nn: el promedio de los k puestos mas cercanos :==##
+
+## 4.1. la funcion de la clase: promediar los k vecinos en el mapa
+knn_reg <- function(coord_train , y_train , coord_nueva , k){
+           pred <- rep(NA , nrow(coord_nueva))
+           for (j in 1:nrow(coord_nueva)){
+                dist <- sqrt((coord_train[,1] - coord_nueva[j,1])^2 + (coord_train[,2] - coord_nueva[j,2])^2)
+                pred[j] <- mean(y_train[order(dist)[1:k]])
            }
-           return(prediccion)
+           return(pred)
 }
 
-##============================================================================##
-##=== 1. Los datos y la particion (semilla 2026)                           ===##
-##============================================================================##
+## 4.2. coordenadas
+coord_train <- as.matrix(train[,c("lon","lat")])
+coord_test <- as.matrix(test[,c("lon","lat")])
 
-## un puesto por fila, con sus votos y su entorno censal, desde el repositorio
-valle <- import("https://raw.githubusercontent.com/eduard-martinez/bdml-applied-economics/main/applications/week-02/input/puestos_valle_2022.rds", trust = T)
+## 4.3. rmse en train y test para k = 1, 5 y 25
+knn <- data.frame(k = c(1,5,25) , rmse_train = NA , rmse_test = NA)
+for (i in 1:nrow(knn)){
+     pred_train <- knn_reg(coord_train , train$voto_petro , coord_train , k=knn$k[i])
+     pred_test <- knn_reg(coord_train , train$voto_petro , coord_test , k=knn$k[i])
+     knn$rmse_train[i] <- sqrt(mean((train$voto_petro - pred_train)^2))
+     knn$rmse_test[i] <- sqrt(mean((test$voto_petro - pred_test)^2))
+}
+knn
 
-## el caso de hoy: Cali y su area metropolitana
-metro <- valle %>%
-         filter(municipio %in% c("CALI", "PALMIRA", "YUMBO", "JAMUNDI"))
-nrow(metro)
+##==: 5. regresion multiple: todas las combinaciones :==##
 
-## la particion: 75% para aprender y 25% bajo llave hasta la seccion 4
-set.seed(2026)
-prueba_id <- sample(nrow(metro), size = round(0.25 * nrow(metro)))
-train <- metro[-prueba_id, ]
-test <- metro[prueba_id, ]
-c(entrenamiento = nrow(train), prueba = nrow(test))
+## 5.1. covariables candidatas (las nueve de la clase)
+covars <- c("educ_superior","estrato_bajo","estrato_alto","edad_20_29","edad_60_74",
+            "mujeres","afro","servicios","log_registrados")
 
-##============================================================================##
-##=== 2. La referencia y la recta con una variable                         ===##
-##============================================================================##
+## 5.2. todas las combinaciones posibles (2^9 - 1 = 511 modelos)
+combos <- list()
+for (k in 1:length(covars)){
+     combos <- c(combos , combn(x=covars , m=k , simplify=F))
+}
 
-## la referencia que no usa ninguna x: predecir la media del entrenamiento
-media_train <- mean(train$voto_petro)
-media_train
+## 5.3. grid de modelos
+grid <- data.frame(id_modelo = 1:length(combos),
+                   n_covars = sapply(combos , length),
+                   covars = sapply(combos , paste , collapse=" + "),
+                   rmse_train = NA,
+                   rmse_test = NA)
 
-## la recta: el voto contra la educacion superior del entorno
-m1 <- lm(voto_petro ~ educ_superior, data = train)
-summary(m1)
+## 5.4. correr los 511 modelos
+for (i in 1:nrow(grid)){
+     modelo_i <- lm(as.formula(paste0("voto_petro ~ " , grid$covars[i])) , data=train)
+     grid$rmse_train[i] <- sqrt(mean((train$voto_petro - predict(modelo_i , train))^2))
+     grid$rmse_test[i] <- sqrt(mean((test$voto_petro - predict(modelo_i , test))^2))
+}
 
-## la nube y la recta de minimos cuadrados
-plot(train$educ_superior, train$voto_petro, pch = 16, col = adjustcolor("black", 0.5),
-     xlab = "Educación superior en el entorno (%)", ylab = "Voto por Petro (%)",
-     main = "257 puestos de entrenamiento y la recta")
-abline(m1, col = "blue", lwd = 2)
+## 5.5. ranking por rmse de test (el train siempre mejora con mas covariables; el test no)
+grid <- grid %>%
+        arrange(rmse_test) %>%
+        mutate(ranking = row_number())
 
-## el rmse dentro y en la prueba, contra la referencia
-data.frame(modelo = c("media del entrenamiento", "recta (educación superior)"),
-           rmse_dentro = c(rmse(train$voto_petro, rep(media_train, nrow(train))),
-                           rmse(train$voto_petro, predict(m1, train))),
-           rmse_prueba = c(rmse(test$voto_petro, rep(media_train, nrow(test))),
-                           rmse(test$voto_petro, predict(m1, test))))
+## top 10 modelos
+grid %>%
+     mutate(rmse_train = round(rmse_train,2) , rmse_test = round(rmse_test,2)) %>%
+     select(ranking , n_covars , covars , rmse_train , rmse_test) %>%
+     head(10)
 
-##============================================================================##
-##=== 3. Los residuos de la recta: ¿que le falta?                          ===##
-##============================================================================##
+## best model
+top_1 <- grid %>% filter(ranking==1)
+top_1
 
-train$ajustado <- predict(m1, train)
-train$residuo <- train$voto_petro - train$ajustado
+##==: 6. el mejor modelo :==##
 
-## contra el ajustado: la suavizada queda plana, la forma lineal basta
-plot(train$ajustado, train$residuo, pch = 16, col = adjustcolor("black", 0.5),
-     xlab = "Voto ajustado (%)", ylab = "Residuo (puntos)",
-     main = "Residuos contra ajustados: sin patrón")
-abline(h = 0, lty = 2)
-lines(lowess(train$ajustado, train$residuo), col = "red", lwd = 2)
+## 6.1. reestimar el mejor modelo
+modelo_best <- lm(as.formula(paste0("voto_petro ~ " , top_1$covars[1])) , data=train)
+summary(modelo_best)
 
-## por municipio: la recta le queda corta a Jamundi y a Yumbo, y le sobra en Palmira
-train %>%
-  group_by(municipio) %>%
-  summarise(puestos = n(), residuo_medio = round(mean(residuo), 1), .groups = "drop") %>%
-  arrange(residuo_medio)
+## 6.2. target predicho vs target original
+test$voto_pred <- predict(modelo_best , test)
+test %>%
+     select(nombre , municipio , voto_petro , voto_pred) %>%
+     mutate(voto_petro = round(voto_petro,1) , voto_pred = round(voto_pred,1)) %>%
+     head(5)
 
-## en el mapa: manchas de un mismo signo = a la recta le falta la ubicacion
-plot(train$lon, train$lat, pch = 16, col = ifelse(train$residuo > 0, "firebrick", "steelblue"),
-     cex = 0.5 + abs(train$residuo) / 10, xlab = "Longitud", ylab = "Latitud",
-     main = "Residuos: votó más (rojo) o menos (azul) de lo que dice la educación")
+## 6.3. la diagonal es la prediccion perfecta
+plot(test$voto_petro , test$voto_pred , pch=16 , col="blue" , xlim=c(10,100) , ylim=c(10,100),
+     xlab="target original (%)" , ylab="target predicho (%)")
+abline(a=0 , b=1 , lty=2)
 
-##============================================================================##
-##=== 4. Varios modelos, la misma prueba                                   ===##
-##============================================================================##
+##==: 7. tabla final :==##
 
-## mas flexibilidad sobre la misma variable: la cubica y el grado 12
-m3 <- lm(voto_petro ~ poly(educ_superior, 3), data = train)
-m12 <- lm(voto_petro ~ poly(educ_superior, 12), data = train)
-
-## mas variables: nueve columnas del censo (estrato, edad, mujeres, afro,
-## servicios y tamano del puesto)
-m9 <- lm(voto_petro ~ educ_superior + estrato_bajo + estrato_alto + edad_20_29 + edad_60_74 +
-                      mujeres + afro + servicios + log(registrados), data = train)
-round(coef(summary(m9)), 3)
-
-## sin formula: el promedio de los k puestos mas cercanos en el mapa
-coord_train <- as.matrix(train[, c("lon", "lat")])
-coord_test <- as.matrix(test[, c("lon", "lat")])
-
-## las predicciones de cada modelo, una sola vez, sobre la misma prueba
-pred_test <- list(rep(media_train, nrow(test)), predict(m1, test), predict(m3, test),
-                  predict(m12, test), predict(m9, test),
-                  knn_reg(coord_train, train$voto_petro, coord_test, k = 1),
-                  knn_reg(coord_train, train$voto_petro, coord_test, k = 5),
-                  knn_reg(coord_train, train$voto_petro, coord_test, k = 25))
-pred_train <- list(rep(media_train, nrow(train)), predict(m1, train), predict(m3, train),
-                   predict(m12, train), predict(m9, train),
-                   knn_reg(coord_train, train$voto_petro, coord_train, k = 1),
-                   knn_reg(coord_train, train$voto_petro, coord_train, k = 5),
-                   knn_reg(coord_train, train$voto_petro, coord_train, k = 25))
-
-## la tabla canonica: k = 1 es el mejor dentro y de los peores fuera; ocho
-## variables mas apenas mueven la aguja frente a la recta
-tabla <- data.frame(modelo = c("media del entrenamiento", "recta (educación superior)", "cúbica",
-                               "grado 12", "nueve variables", "k-NN mapa, k = 1",
-                               "k-NN mapa, k = 5", "k-NN mapa, k = 25"),
-                    rmse_dentro = sapply(pred_train, function(p) rmse(train$voto_petro, p)),
-                    rmse_prueba = sapply(pred_test, function(p) rmse(test$voto_petro, p)),
-                    mae_prueba = sapply(pred_test, function(p) mae(test$voto_petro, p)),
-                    r2_prueba = sapply(pred_test, function(p) r2_prueba(test$voto_petro, p, train$voto_petro)))
+## rmse en train y test de todos los modelos de la clase
+tabla <- data.frame(modelo = c("media del train (baseline)",
+                               "regresion simple (educacion superior)",
+                               paste0("k-nn en el mapa (k = " , knn$k , ")"),
+                               paste0("mejor multiple (" , top_1$n_covars , " covariables)")),
+                    rmse_train = c(rmse_train_media , rmse_train_simple , knn$rmse_train , top_1$rmse_train),
+                    rmse_test = c(rmse_test_media , rmse_test_simple , knn$rmse_test , top_1$rmse_test))
 tabla %>%
-  mutate(across(where(is.numeric), ~round(.x, 2))) %>%
-  arrange(rmse_prueba)
-
-##============================================================================##
-##=== 5. El mejor modelo y sus predicciones                                ===##
-##============================================================================##
-
-## gana por poco el de nueve variables (6,76 contra 6,83 de la recta); con el
-## cerramos la semana
-mejor <- m9
-test$prediccion <- predict(mejor, test)
-test$error <- test$voto_petro - test$prediccion
-
-## rmse final, una sola vez, en la prueba
-rmse(test$voto_petro, test$prediccion)
-
-## predicho contra observado: la diagonal es la prediccion perfecta; las
-## predicciones se comprimen hacia la media
-plot(test$voto_petro, test$prediccion, pch = 16, col = "blue", xlim = c(10, 100), ylim = c(10, 100),
-     xlab = "Voto observado (%)", ylab = "Voto predicho (%)",
-     main = "El mejor modelo en los 86 puestos de prueba")
-abline(a = 0, b = 1, lty = 2)
-
-## los puestos que el modelo clava...
-test %>%
-  mutate(voto_petro = round(voto_petro, 1), prediccion = round(prediccion, 1), error = round(error, 1)) %>%
-  select(nombre, municipio, voto_petro, prediccion, error) %>%
-  arrange(abs(error)) %>%
-  head(5)
-
-## ...y los que se le escapan: casi todos fuera de Cali, donde la ubicacion
-## dice cosas que el censo no (el tema de la sesion 3)
-test %>%
-  mutate(voto_petro = round(voto_petro, 1), prediccion = round(prediccion, 1), error = round(error, 1)) %>%
-  select(nombre, municipio, voto_petro, prediccion, error) %>%
-  arrange(desc(abs(error))) %>%
-  head(5)
+     mutate(rmse_train = round(rmse_train,2) , rmse_test = round(rmse_test,2)) %>%
+     arrange(rmse_test)
