@@ -9,13 +9,13 @@ rm(list=ls())
 
 ## load/install packages
 require(pacman)
-p_load(rio , dplyr)
+p_load(rio , dplyr , skimr)
 
 ##==: 1. prepare data :==##
 
 ## 1.1. load data (la base publica del curso, directo desde github)
 url <- "https://raw.githubusercontent.com/eduard-martinez/bdml-applied-economics/main/applications/week-02/input/puestos_valle_2022.rds"
-db <- import(url , trust=T)
+db <- import("input/puestos_valle_2022.rds" , trust=T)
 
 ## 1.2. subset data: cali y su area metropolitana
 df <- db %>%
@@ -25,9 +25,19 @@ nrow(df)
 
 ## 1.3. split data (la particion de la clase: semilla 2026, 25% a la prueba)
 set.seed(2026)
+
+## sample
 sample <- sample(x = nrow(df) , round(nrow(df)*0.25))
+
+## subset test
 test <- df[sample,]
+
+## subset train
 train <- df[-sample,]
+
+## validar 
+hist(train$voto_petro)
+hist(test$voto_petro)
 
 ##==: 2. baseline: la media del target :==##
 
@@ -38,6 +48,21 @@ test$voto_pred <- mean(train$voto_petro)
 test %>% select(nombre , municipio , voto_petro , voto_pred) %>% head(5)
 
 ## 2.3. rmse en train y test
+
+## prueba 
+pradera <- select(test, voto_petro) %>% 
+           mutate(voto_pred = mean(train$voto_petro))
+
+## crear residuos
+pradera <- mutate(pradera , 
+                  residuo = voto_petro - voto_pred , 
+                  residuo_2 = residuo^2,
+                  residuo_abs = abs(residuo))
+
+sqrt(mean(pradera$residuo_2))
+mean(pradera$residuo_abs)
+
+## rmse train 
 rmse_train_media <- sqrt(mean((train$voto_petro - mean(train$voto_petro))^2))
 rmse_test_media <- sqrt(mean((test$voto_petro - test$voto_pred)^2))
 c(train = rmse_train_media , test = rmse_test_media)
@@ -55,7 +80,23 @@ abline(modelo_simple , col="blue" , lwd=2)
 
 ## 3.3. target predicho vs target original
 test$voto_pred <- predict(modelo_simple , test)
-test %>% select(nombre , municipio , voto_petro , voto_pred) %>% head(5)
+test %>% select(nombre , educ_superior , voto_petro , voto_pred) %>% head(5)
+
+## crear residuos
+praderayork <- test %>% 
+               select(voto_petro , voto_pred) %>% 
+               mutate(residuo = voto_petro - voto_pred , 
+                      residuo_2 = residuo^2,
+                      residuo_abs = abs(residuo))
+
+sqrt(mean(praderayork$residuo_2))
+mean(praderayork$residuo_abs)
+
+## plot residuos vs pred
+plot(praderayork$voto_pred , praderayork$voto_petro)
+abline(a=0 , b=1 , lty=2)
+
+plot(praderayork$residuo , praderayork$voto_petro)
 
 ## 3.4. rmse en train y test
 rmse_train_simple <- sqrt(mean((train$voto_petro - predict(modelo_simple , train))^2))
