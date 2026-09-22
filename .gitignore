@@ -35,7 +35,10 @@ problem-sets/**/borrador/
 # Generadores de datos simulados de las aplicaciones (00_*.R): se corren localmente y nunca se publican;
 # en GitHub solo van los datos que producen (input/)
 applications/**/00_*.R
-gen_data/
+
+# Código interno del curso: los scripts que preparan los datos y los que reproducen las figuras
+# empíricas de cada deck. Se corren localmente; en GitHub sólo van sus productos (input/ y los PDF)
+backend_code/
 
 # OS
 .DS_Store
