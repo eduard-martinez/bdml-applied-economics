@@ -1,0 +1,18 @@
+variable,definicion
+puesto,identificador del puesto de votacion
+manzanas,manzanas del censo asignadas al puesto
+manzanas_compartidas,manzanas que comparte con otro puesto
+capacidad,registrados que el entorno debe cubrir
+distancia_media,"distancia media de las manzanas al puesto, en metros"
+desfase,"desfase entre poblacion en edad de votar del entorno y registrados, en %"
+personas,personas en el entorno (conteo)
+edad_votar,personas de 18 o mas (conteo)
+hombres,hombres (conteo)
+mujeres,mujeres (conteo)
+viviendas,viviendas (conteo)
+hogares,hogares (conteo)
+"educ_ninguna, educ_basica, educ_tecnica, educ_superior",personas por nivel educativo alcanzado (conteos)
+edad_0_19 ... edad_75,personas por grupo de edad (conteos)
+"etnia_ninguna, indigena, rom, raizal, palenquero, afro",personas por autorreconocimiento etnico (conteos)
+"serv_agua, serv_alcantarillado, serv_energia, serv_gas, serv_telefono, serv_internet",viviendas con cada servicio (conteos; telefonia es cero en el censo 2018)
+estrato_0 ... estrato_6,viviendas por estrato (conteos; 0 = sin estrato)
