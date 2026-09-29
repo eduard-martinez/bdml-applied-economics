@@ -158,7 +158,33 @@ barplot(sort(b_1se) , horiz=T , las=1 , col="lightblue" ,
         xlab="coeficiente" , main="lo que sobrevive con lambda 1se")
 par(mar=c(5,4,4,2) + 0.1)
 
-##==: 5. tabla final :==##
+##==: 5. la escala: estandarizar antes de penalizar :==##
+
+## 5.1. las 37 no viven en la misma escala (la promesa del comentario de 1.4)
+## el peaje cobra por el tamano del coeficiente: una variable de unidades chicas
+## necesita un coeficiente grande (cara) y una de unidades grandes, uno chico (barata)
+sds <- apply(x_train , 2 , sd)
+round(head(sort(sds) , 3) , 2)
+round(tail(sort(sds) , 3) , 2)
+
+## 5.2. el mismo lasso sin estandarizar (standardize=F): otro juez y otra lista
+lasso_crudo <- cv.glmnet(x=x_train , y=y_train , alpha=1 , foldid=pliegue , standardize=F)
+c(rmse_cv_min = sqrt(min(lasso_crudo$cvm)) ,
+  coeficientes = unname(lasso_crudo$nzero[which.min(lasso_crudo$cvm)]))
+
+## el orden de entrada cambia: sin estandarizar mandan las variables baratas (sd grande)
+betas_c <- as.matrix(lasso_crudo$glmnet.fit$beta)
+entrada_c <- apply(betas_c!=0 , 1 , function(x) which(x)[1])
+names(sort(entrada_c))[1:6]
+
+## 5.3. estandarizar a mano y apagar standardize: vuelven las cifras de la seccion 4
+## (glmnet ya lo hacia por dentro; por eso standardize=T es el default y los
+## coeficientes se reportan en las unidades originales; el tercer decimal difiere
+## porque glmnet divide la sd por n y scale() por n - 1)
+lasso_z <- cv.glmnet(x=scale(x_train) , y=y_train , alpha=1 , foldid=pliegue , standardize=F)
+c(default = sqrt(min(lasso$cvm)) , a_mano = sqrt(min(lasso_z$cvm)) , crudo = sqrt(min(lasso_crudo$cvm)))
+
+##==: 6. tabla final :==##
 
 ## rmse dentro y de cv de los cuatro modelos (el juez decide; la prueba sigue bajo llave)
 tabla <- data.frame(modelo = c("ols con las 37 del censo","ridge (lambda min)","lasso (lambda min)","lasso (lambda 1se)"),
