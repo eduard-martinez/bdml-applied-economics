@@ -1,5 +1,5 @@
 ## Big Data y Machine Learning para Economia Aplicada
-## week-03-b: zoom al juez y la perilla (cv, ridge y lasso con las 37 del censo)
+## week-03-b: zoom al juez y la perilla en el pais (cv, ridge y lasso con las 37 del censo)
 ## Last run: Sep 29, 2026
 
 ##==: 0. initial setup :==##
@@ -18,26 +18,21 @@ url <- "https://raw.githubusercontent.com/eduard-martinez/bdml-applied-economics
 puestos <- import("input/puestos_colombia_2022.rds" , trust=T)
 censo37 <- import("input/censo37_puestos_2022.rds" , trust=T)
 
-## 1.2. la misma base de week-03.R: cali y su area metropolitana con las 37 del censo
+## 1.2. la misma base de week-03.R: los 12.000 puestos del pais con las 37 del censo
 db <- puestos %>%
       select(puesto , nombre , municipio , departamento , voto_petro , muestra) %>%
       inner_join(censo37 , by="puesto") %>%
       subset(!is.na(educ_superior) & !is.na(afro))
-df <- db %>% subset(departamento=="VALLE" & municipio %in% c("CALI","PALMIRA","YUMBO","JAMUNDI"))
 x_censo <- setdiff(names(censo37) , "puesto")
-c(puestos = nrow(df) , variables = length(x_censo))
+c(puestos = nrow(db) , variables = length(x_censo))
 
-## 1.3. split data (la particion de la semana 2: semilla 2026, 25% a la prueba)
-set.seed(2026)
-
-## sample
-sample <- sample(x = nrow(df) , round(nrow(df)*0.25))
+## 1.3. split data (la particion fija del curso: 9.602 para aprender y 2.398 bajo llave)
 
 ## subset test
-test <- df[sample,]
+test <- db %>% subset(muestra=="prueba")
 
 ## subset train
-train <- df[-sample,]
+train <- db %>% subset(muestra=="entrenamiento")
 
 ## validar
 c(train = nrow(train) , test = nrow(test))
@@ -48,12 +43,12 @@ y_train <- train$voto_petro
 
 ##==: 2. el juez por dentro: 10 pliegues, 10 errores, un promedio y su ee :==##
 
-## 2.1. los pliegues de la clase (semilla 2026, los mismos de week-03.R)
+## 2.1. los 10 pliegues del pais (semilla 2026, los mismos de la parte C de week-03.R)
 set.seed(2026)
 pliegue <- sample(rep(1:10 , length.out=nrow(train)))
 table(pliegue)
 
-## 2.2. el modelo a juzgar: ols con las 37 (el ajuste dentro es un espejismo)
+## 2.2. el modelo a juzgar: ols con las 37 del censo, y su rmse dentro de la muestra
 f_censo <- as.formula(paste0("voto_petro ~ " , paste(x_censo , collapse=" + ")))
 modelo_ols <- lm(f_censo , data=train)
 sqrt(mean(residuals(modelo_ols)^2))
@@ -73,6 +68,7 @@ cv_ols %>% mutate(mse = round(mse,1) , rmse = round(rmse,2))
 
 ## 2.4. el estimador y su ee: el rmse de cv es un promedio, y un promedio trae error estandar
 ## (la formula del deck: ee = d.e.(mse_1 , ... , mse_J)/raiz de J)
+## con 9.602 puestos el veredicto es firme: el ee queda chico frente al mse
 ee_ols <- sd(cv_ols$mse)/sqrt(10)
 c(rmse_cv = sqrt(mean(error2)) , ee_del_mse = ee_ols)
 
@@ -100,19 +96,22 @@ c(lambda_min = ridge$lambda.min , rmse_cv_min = sqrt(ridge$cvm[i_min_r]) ,
   lambda_1se = ridge$lambda.1se , rmse_cv_1se = sqrt(ridge$cvm[i_1se_r]))
 
 ## 3.4. zoom a las variables: tres paradas del camino (lambda casi 0, el elegido y el de 1se)
-## una fila por variable, ordenadas por el tamano del coeficiente sin penalizar
+## con 9.602 puestos y 37 columnas el juez elige el extremo: lambda_min es el lambda mas
+## chico de la grilla y sus coeficientes son los de ols (no hay varianza que comprar);
+## el encogimiento se ve en la columna de 1se, un precio mas alto
 betas_r <- as.matrix(ridge$glmnet.fit$beta)
 zoom_r <- data.frame(lambda_cero = betas_r[,ncol(betas_r)] ,
                      lambda_min = betas_r[,i_min_r] ,
                      lambda_1se = betas_r[,i_1se_r])
 zoom_r %>% arrange(desc(abs(lambda_cero))) %>% round(3) %>% head(8)
 
-## cuantas variables quedan en cero exacto con el lambda elegido: ninguna
-sum(zoom_r$lambda_min==0)
+## cuantas quedan en cero exacto aun con el precio de 1se: ninguna (ridge nunca apaga)
+sum(zoom_r$lambda_1se==0)
 
-## 3.5. pintar el encogimiento: cada punto es una variable; todos van hacia cero, ninguno llega
-plot(zoom_r$lambda_cero , zoom_r$lambda_min , pch=16 , col="blue" ,
-     xlab="coeficiente con lambda casi 0 (ols)" , ylab="coeficiente con el lambda del juez")
+## 3.5. pintar el encogimiento (con el precio de 1se: con el del juez seria la diagonal):
+## cada punto es una variable; todos van hacia cero y ninguno llega
+plot(zoom_r$lambda_cero , zoom_r$lambda_1se , pch=16 , col="blue" ,
+     xlab="coeficiente con lambda casi 0 (ols)" , ylab="coeficiente con el lambda de 1se")
 abline(a=0 , b=1 , lty=2)
 abline(h=0 , v=0 , col="gray70")
 
@@ -146,7 +145,8 @@ betas_l <- as.matrix(lasso$glmnet.fit$beta)
 entrada <- apply(betas_l!=0 , 1 , function(x) which(x)[1])
 names(sort(entrada))[1:6]
 
-## 4.6. lo que queda con cada lambda: cuantas con el minimo, y cuales con la regla 1se
+## 4.6. lo que queda con cada lambda: 36 con el minimo y 30 con la regla 1se
+## (con n grande la penalizacion apenas muerde: casi todas las 37 aportan)
 sum(betas_l[,i_min_l]!=0)
 coef_1se <- coef(lasso , s="lambda.1se")
 round(coef_1se[coef_1se[,1]!=0 , , drop=F] , 3)
@@ -154,7 +154,7 @@ round(coef_1se[coef_1se[,1]!=0 , , drop=F] , 3)
 ## pintar las sobrevivientes de 1se (sin el intercepto)
 b_1se <- coef_1se[coef_1se[,1]!=0 , ][-1]
 par(mar=c(4,10,2,1))
-barplot(sort(b_1se) , horiz=T , las=1 , col="lightblue" ,
+barplot(sort(b_1se) , horiz=T , las=1 , col="lightblue" , cex.names=0.6 ,
         xlab="coeficiente" , main="lo que sobrevive con lambda 1se")
 par(mar=c(5,4,4,2) + 0.1)
 
@@ -187,6 +187,8 @@ c(default = sqrt(min(lasso$cvm)) , a_mano = sqrt(min(lasso_z$cvm)) , crudo = sqr
 ##==: 6. tabla final :==##
 
 ## rmse dentro y de cv de los cuatro modelos (el juez decide; la prueba sigue bajo llave)
+## las cuatro filas casi empatan: con 9.602 puestos las 37 no necesitan peaje;
+## la perilla paga cuando las columnas crecen (las 1.291 de la parte C de week-03.R)
 tabla <- data.frame(modelo = c("ols con las 37 del censo","ridge (lambda min)","lasso (lambda min)","lasso (lambda 1se)"),
                     coeficientes = c(sum(!is.na(coef(modelo_ols))) - 1 , unname(ridge$nzero[i_min_r]) ,
                                      unname(lasso$nzero[i_min_l]) , unname(lasso$nzero[i_1se_l])),
