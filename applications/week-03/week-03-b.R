@@ -177,12 +177,10 @@ betas_c <- as.matrix(lasso_crudo$glmnet.fit$beta)
 entrada_c <- apply(betas_c!=0 , 1 , function(x) which(x)[1])
 names(sort(entrada_c))[1:6]
 
-## 5.3. estandarizar a mano y apagar standardize: vuelven las cifras de la seccion 4
-## (glmnet ya lo hacia por dentro; por eso standardize=T es el default y los
-## coeficientes se reportan en las unidades originales; el tercer decimal difiere
-## porque glmnet divide la sd por n y scale() por n - 1)
-lasso_z <- cv.glmnet(x=scale(x_train) , y=y_train , alpha=1 , foldid=pliegue , standardize=F)
-c(default = sqrt(min(lasso$cvm)) , a_mano = sqrt(min(lasso_z$cvm)) , crudo = sqrt(min(lasso_crudo$cvm)))
+## 5.3. el veredicto y la practica: dejamos que glmnet lo haga por dentro
+## (standardize=T es el default: penaliza en la escala comun y reporta los
+## coeficientes en las unidades originales)
+c(estandarizado = sqrt(min(lasso$cvm)) , crudo = sqrt(min(lasso_crudo$cvm)))
 
 ##==: 6. tabla final :==##
 
