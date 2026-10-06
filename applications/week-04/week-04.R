@@ -110,7 +110,7 @@ sum(fitted(lpm) > 1 | fitted(lpm) < 0)
 logit_m <- glm(gana_petro ~ educ_superior , family=binomial , data=train_m)
 coef(logit_m)
 
-## la frontera p = 0,5 (donde el indice se anula) y el grafico de las dos curvas
+## la frontera p = 0,5 (donde la ventaja esperada x_beta se anula) y el grafico de las dos curvas
 -coef(logit_m)[1]/coef(logit_m)[2]
 plot(train_m$educ_superior , jitter(train_m$gana_petro , 0.1) , pch="|" , col="orange" , cex=0.6 ,
      xlab="educacion superior (%)" , ylab="P(gana Petro)")
