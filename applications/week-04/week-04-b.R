@@ -24,8 +24,7 @@ censo_dpto <- import("input/censo_dpto_puestos_2022.rds" , trust=T)
 db <- puestos %>%
       select(puesto , nombre , municipio , departamento , gana_petro , muestra) %>%
       inner_join(censo_dpto , by="puesto")
-x_vars <- setdiff(names(censo_dpto) , "puesto")
-length(x_vars)
+db <- db[,1:43]
 
 ## 1.3. split data (la particion fija del curso: 9.602 para aprender y 2.398 bajo llave)
 test <- db %>% subset(muestra=="prueba")
@@ -33,8 +32,8 @@ train <- db %>% subset(muestra=="entrenamiento")
 c(train = nrow(train) , test = nrow(test))
 
 ## 1.4. las matrices de glmnet y los 10 pliegues de la semana 3 (semilla 2026)
-x_train <- as.matrix(train[,x_vars])
-x_test <- as.matrix(test[,x_vars])
+x_train <- as.matrix(select(train,-gana_petro))
+x_test <- as.matrix(select(test,-gana_petro))
 set.seed(2026)
 pliegue <- sample(rep(1:10 , length.out=nrow(train)))
 
@@ -50,8 +49,8 @@ betas <- as.matrix(camino$beta)
 ## 2.3. tres paradas del camino: precio alto (la primera con 5 o mas activas), medio (30 o mas)
 ## y bajo (150 o mas)
 parada_alta <- which(camino$df >= 5)[1]
-parada_media <- which(camino$df >= 30)[1]
-parada_baja <- which(camino$df >= 150)[1]
+parada_media <- which(camino$df >= 20)[1]
+parada_baja <- which(camino$df >= 30)[1]
 camino$lambda[c(parada_alta , parada_media , parada_baja)]
 camino$df[c(parada_alta , parada_media , parada_baja)]
 
