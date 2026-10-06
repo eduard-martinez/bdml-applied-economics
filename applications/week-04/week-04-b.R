@@ -25,8 +25,6 @@ db <- puestos %>%
       select(puesto , nombre , municipio , departamento , gana_petro , muestra) %>%
       inner_join(censo_dpto , by="puesto")
 x_vars <- setdiff(names(db) , c("puesto","nombre","municipio","departamento","muestra","gana_petro"))
-x_train <- as.matrix(train[,x_vars])
-x_test <- as.matrix(test[,x_vars])
 
 ## 1.3. split data (la particion fija del curso: 9.602 para aprender y 2.398 bajo llave)
 test <- db %>% subset(muestra=="prueba")
@@ -34,8 +32,8 @@ train <- db %>% subset(muestra=="entrenamiento")
 c(train = nrow(train) , test = nrow(test))
 
 ## 1.4. las matrices de glmnet y los 10 pliegues de la semana 3 (semilla 2026)
-x_train <- as.matrix(select(train,-gana_petro))
-x_test <- as.matrix(select(test,-gana_petro))
+x_train <- as.matrix(train[,x_vars])
+x_test <- as.matrix(test[,x_vars])
 set.seed(2026)
 pliegue <- sample(rep(1:10 , length.out=nrow(train)))
 
@@ -126,7 +124,6 @@ test %>% select(nombre , municipio , gana_petro , score_lpm) %>% head(5)
 
 ## 5.1. la regla con tau = 0,5: "gana" si el score es 0,5 o mas
 ## la matriz de confusion: filas lo que paso, columnas lo que dijo la regla
-test$score_lpm <- runif(min = 0,max = 1,n = nrow(test))
 test$pred_lpm_05 <- ifelse(test$score_lpm >= 0.5 , 1 , 0)
 table(observado = test$gana_petro , predicho = test$pred_lpm_05)
 
