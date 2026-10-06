@@ -24,7 +24,9 @@ censo_dpto <- import("input/censo_dpto_puestos_2022.rds" , trust=T)
 db <- puestos %>%
       select(puesto , nombre , municipio , departamento , gana_petro , muestra) %>%
       inner_join(censo_dpto , by="puesto")
-db <- db[,1:43]
+x_vars <- setdiff(names(db) , c("puesto","nombre","municipio","departamento","muestra","gana_petro"))
+x_train <- as.matrix(train[,x_vars])
+x_test <- as.matrix(test[,x_vars])
 
 ## 1.3. split data (la particion fija del curso: 9.602 para aprender y 2.398 bajo llave)
 test <- db %>% subset(muestra=="prueba")
@@ -46,8 +48,8 @@ camino <- glmnet(x=x_train , y=train$gana_petro , alpha=1)
 ## 2.2. el camino guarda una columna de coeficientes por cada lambda (1.291 filas x 100 columnas)
 betas <- as.matrix(camino$beta)
 
-## 2.3. tres paradas del camino: precio alto (la primera con 5 o mas activas), medio (30 o mas)
-## y bajo (150 o mas)
+## 2.3. tres paradas del camino: precio alto (la primera con 5 o mas activas), medio (20 o mas)
+## y bajo (30 o mas)
 parada_alta <- which(camino$df >= 5)[1]
 parada_media <- which(camino$df >= 20)[1]
 parada_baja <- which(camino$df >= 30)[1]
@@ -89,7 +91,7 @@ data.frame(regla = c("lambda min","lambda 1se") ,
 ## 3.3. los coeficientes del lambda min: cuales quedan distintos de cero y cuanto pesan
 b_min <- coef(cv_lpm , s="lambda.min")
 activas_min <- b_min[b_min[,1]!=0 , ][-1]
-round(head(activas_min[order(-abs(activas_min))] , 15) , 4)
+round(head(activas_min[order(-abs(activas_min))] , 35) , 4)
 
 ## 3.4. los dos objetos juntos, con el mismo eje (log lambda):
 ## arriba, que le pasa a los coeficientes; abajo, que le pasa al error de validacion
@@ -124,6 +126,7 @@ test %>% select(nombre , municipio , gana_petro , score_lpm) %>% head(5)
 
 ## 5.1. la regla con tau = 0,5: "gana" si el score es 0,5 o mas
 ## la matriz de confusion: filas lo que paso, columnas lo que dijo la regla
+test$score_lpm <- runif(min = 0,max = 1,n = nrow(test))
 test$pred_lpm_05 <- ifelse(test$score_lpm >= 0.5 , 1 , 0)
 table(observado = test$gana_petro , predicho = test$pred_lpm_05)
 
@@ -194,6 +197,7 @@ logit_sel <- glm(gana_petro ~ . , family=binomial , data=db_sel)
 
 ## 7.3. la probabilidad a mano: primero la ventaja esperada x'beta, despues la S de la lamina 7
 ## (p = e^xb/(1 + e^xb), escrita como 1/(1 + e^-xb), que no se desborda)
+b_logit[is.na(b_logit)] <- 0
 b_logit <- coef(logit_sel)
 test$xb_logit <- as.numeric(cbind(1 , x_test[,seleccionadas]) %*% b_logit)
 test$p_logit <- 1/(1 + exp(-test$xb_logit))
