@@ -1,6 +1,8 @@
 ## Big Data y Machine Learning para Economia Aplicada
-## week-04: clasificacion, de la probabilidad a la decision
-## Last run: Oct 01, 2026
+## week-04-replication: replica todas las cifras de las diapositivas de la semana 4
+## (clasificacion: de la probabilidad a la decision). La aplicacion corta de clase
+## es week-04-application.R
+## Last run: Oct 8, 2026
 
 ##==: 0. initial setup :==##
 
@@ -53,23 +55,6 @@ c(train = nrow(train) , test = nrow(test))
 ## 1.4. los 10 pliegues del pais de la semana 3 (semilla 2026)
 set.seed(2026)
 pliegue <- sample(rep(1:10 , length.out=nrow(train)))
-
-## 1.5. el censo x departamento de la semana 3: 1.291 columnas para la perilla
-dptos <- sort(unique(db$departamento))
-nombres <- c(x_censo , paste0("dpto:" , dptos) , paste0(rep(x_censo , each=length(dptos)) , ":" , dptos))
-x_larga <- matrix(0 , nrow(train) , length(nombres) , dimnames=list(NULL , nombres))
-x_larga_test <- matrix(0 , nrow(test) , length(nombres) , dimnames=list(NULL , nombres))
-x_larga[,x_censo] <- as.matrix(train[,x_censo])
-x_larga_test[,x_censo] <- as.matrix(test[,x_censo])
-for (d in dptos){
-     x_larga[,paste0("dpto:",d)] <- as.numeric(train$departamento==d)
-     x_larga_test[,paste0("dpto:",d)] <- as.numeric(test$departamento==d)
-     for (v in x_censo){
-          x_larga[,paste0(v,":",d)] <- train[[v]]*(train$departamento==d)
-          x_larga_test[,paste0(v,":",d)] <- test[[v]]*(test$departamento==d)
-     }
-}
-dim(x_larga)
 
 ##==: 2. la y, antes de cualquier modelo :==##
 
@@ -213,90 +198,42 @@ abline(v = 5/6 , lty=2 , col="blue")
 ## los extremos sin modelo: darlos todos por seguros o trabajarlos todos
 c(todos_seguros = sum(test$gana_petro==0)*c_fp , trabajar_todos = sum(test$gana_petro==1)*c_fn)
 
-##==: 6. los competidores: la perilla, otra vez :==##
+##==: 6. el competidor: el lpm del pais :==##
 
-## 6.1. el lpm con lasso: la penalizacion gaussiana de la semana 3 sobre la y de 0/1
-## (tarda cerca de un minuto)
-lpm_lasso <- cv.glmnet(x=x_larga , y=train$gana_petro , alpha=1 , foldid=pliegue , keep=T)
-i_min <- which.min(abs(lpm_lasso$lambda - lpm_lasso$lambda.min))
-i_1se <- which.min(abs(lpm_lasso$lambda - lpm_lasso$lambda.1se))
-c(columnas_min = unname(lpm_lasso$nzero[i_min]) , columnas_1se = unname(lpm_lasso$nzero[i_1se]))
+## 6.1. la perdida cuadratica de la semana 2 sobre la y de 0/1: el mismo ols de la
+## semana 3 (censo + dummies de departamento), solo cambio la y
+lpm_p <- lm(f_dpto , data=train)
+test$p_lpm <- predict(lpm_p , test)
 
 ## ordena bien, pero sus "probabilidades" no son probabilidades
-test$p_lpm <- as.numeric(predict(lpm_lasso , x_larga_test , s="lambda.min"))
-c(auc_cv = auc(train$gana_petro , lpm_lasso$fit.preval[,i_min]) , auc_test = auc(test$gana_petro , test$p_lpm))
-c(fuera = sum(test$p_lpm < 0 | test$p_lpm > 1) , minimo = min(test$p_lpm) , maximo = max(test$p_lpm))
+c(fuera = sum(test$p_lpm < 0 | test$p_lpm > 1) , minimo = round(min(test$p_lpm),2) , maximo = round(max(test$p_lpm),2))
 
-## 6.2. la logistica con las variables que el lpm-lasso dejo (regla 1-se)
-## ojo, regla de oro #3: la seleccion uso todo el entrenamiento y esta validacion
-## hereda esa eleccion (tarda cerca de un minuto)
-b_sel <- coef(lpm_lasso , s="lambda.1se")
-sel <- rownames(b_sel)[as.numeric(b_sel)!=0][-1]
-length(sel)
-df_sel <- data.frame(y = train$gana_petro , x_larga[,sel])
-df_sel_test <- data.frame(x_larga_test[,sel])
-logit_sel <- suppressWarnings(glm(y ~ . , family=binomial , data=df_sel))
-test$p_sel <- suppressWarnings(predict(logit_sel , df_sel_test , type="response"))
-cv_sel <- rep(NA , nrow(train))
+## 6.2. el mismo lpm juzgado con los 10 pliegues, y las dos auc
+cv_lpm <- rep(NA , nrow(train))
 for (j in 1:10){
-     g <- suppressWarnings(glm(y ~ . , family=binomial , data=df_sel[pliegue!=j,]))
-     cv_sel[pliegue==j] <- suppressWarnings(predict(g , df_sel[pliegue==j,] , type="response"))
+     g <- lm(f_dpto , data=train[pliegue!=j,])
+     cv_lpm[pliegue==j] <- predict(g , train[pliegue==j,])
 }
-c(auc_cv = auc(train$gana_petro , cv_sel) , auc_test = auc(test$gana_petro , test$p_sel))
+c(auc_cv = auc(train$gana_petro , cv_lpm) , auc_test = auc(test$gana_petro , test$p_lpm))
 
-## 6.3. el lasso directamente sobre el logit: penalizar la log-verosimilitud
-## (el pipeline honesto completo; tarda varios minutos)
-lasso_logit <- cv.glmnet(x=x_larga , y=train$gana_petro , family="binomial" , alpha=1 , foldid=pliegue , keep=T)
-il_min <- which.min(abs(lasso_logit$lambda - lasso_logit$lambda.min))
-test$p_lasso <- as.numeric(predict(lasso_logit , x_larga_test , s="lambda.min" , type="response"))
-cv_lasso <- as.numeric(lasso_logit$fit.preval[,il_min])
-c(columnas = unname(lasso_logit$nzero[il_min]) , auc_cv = auc(train$gana_petro , cv_lasso) ,
-  auc_test = auc(test$gana_petro , test$p_lasso))
-
-## 6.4. los vecinos votan: la fraccion de los k puestos mas cercanos donde gano Petro
-knn_reg <- function(coord_train , y_train , coord_nueva , k){
-           pred <- matrix(NA , nrow(coord_nueva) , length(k))
-           for (j in 1:nrow(coord_nueva)){
-                dist <- (coord_train[,1] - coord_nueva[j,1])^2 + (coord_train[,2] - coord_nueva[j,2])^2
-                vecinos <- y_train[order(dist)[1:max(k)]]
-                pred[j,] <- cumsum(vecinos)[k]/k
-           }
-           return(pred)
-}
-
-## k por cv con la auc (con k chico los vecinos dicen 0 o 1 exactos; tarda un par de minutos)
-coord <- as.matrix(train[,c("lon","lat")])
-ks <- c(1:30 , 35 , 40 , 50 , 60 , 75 , 100)
-pred_cv <- matrix(NA , nrow(train) , length(ks))
-for (j in 1:10){
-     pred_cv[pliegue==j,] <- knn_reg(coord[pliegue!=j,] , train$gana_petro[pliegue!=j] , coord[pliegue==j,] , ks)
-}
-auc_k <- rep(NA , length(ks))
-for (i in 1:length(ks)){
-     auc_k[i] <- auc(train$gana_petro , pred_cv[,i])
-}
-k_elegido <- ks[which.max(auc_k)]
-c(k = k_elegido , auc_cv = max(auc_k))
-
-## los vecinos en la prueba
-test$p_knn <- knn_reg(coord , train$gana_petro , as.matrix(test[,c("lon","lat")]) , k_elegido)[,1]
-auc(test$gana_petro , test$p_knn)
-
-## target predicho vs target original (el lasso logistico)
-test %>% select(nombre , departamento , gana_petro , p_lasso) %>% mutate(p_lasso = round(p_lasso , 2)) %>% head(5)
+## target predicho vs target original (la logistica censo + dummies)
+test %>% select(nombre , departamento , gana_petro , p_dpto) %>% mutate(p_dpto = round(p_dpto , 2)) %>% head(5)
 
 ##==: 7. evaluar y comparar :==##
 
-## 7.1. la curva roc del lasso logistico y de los vecinos: todos los umbrales a la vez
-umbrales <- sort(unique(c(-1 , quantile(test$p_lasso , seq(0 , 1 , length.out=100)) , 2)) , decreasing=T)
-roc_lasso <- data.frame(fpr = rep(NA , length(umbrales)) , tpr = NA)
-for (i in 1:length(umbrales)){
-     roc_lasso$fpr[i] <- mean(test$p_lasso[test$gana_petro==0] >= umbrales[i])
-     roc_lasso$tpr[i] <- mean(test$p_lasso[test$gana_petro==1] >= umbrales[i])
+## 7.1. las dos curvas roc, la logistica y el lpm: todos los umbrales a la vez
+roc_mano <- function(p){
+            u <- sort(unique(c(-2 , quantile(p , seq(0 , 1 , length.out=100)) , 2)) , decreasing=T)
+            data.frame(fpr = sapply(u , function(t) mean(p[test$gana_petro==0] >= t)) ,
+                       tpr = sapply(u , function(t) mean(p[test$gana_petro==1] >= t)))
 }
-plot(roc_lasso$fpr , roc_lasso$tpr , type="l" , col="red" , lwd=2 ,
+roc_dpto <- roc_mano(test$p_dpto)
+roc_lpm <- roc_mano(test$p_lpm)
+plot(roc_dpto$fpr , roc_dpto$tpr , type="l" , col="blue" , lwd=2 ,
      xlab="tasa de falsos positivos (1 - especificidad)" , ylab="tasa de verdaderos positivos")
+lines(roc_lpm$fpr , roc_lpm$tpr , col="red" , lwd=2)
 abline(a=0 , b=1 , lty=2 , col="gray")
+legend("bottomright" , legend=c("logistica, censo + dummies" , "lpm, censo + dummies") , col=c("blue","red") , lty=1 , bty="n")
 
 ## ordenar no es decidir: el voto de 2018 como puntaje ordena muy bien...
 auc(test$gana_petro[con_historia] , test$voto_petro_2018[con_historia])
@@ -307,21 +244,21 @@ c(puestos = nrow(crecio) , gana_ahora = mean(crecio$gana_petro))
 
 ## 7.2. calibracion por deciles: cuando el modelo dice 0,8, ¿gana el 80%?
 calibra <- test %>%
-           mutate(decil = ntile(p_lasso , 10)) %>%
+           mutate(decil = ntile(p_dpto , 10)) %>%
            group_by(decil) %>%
-           summarise(predicha = mean(p_lasso) , observada = mean(gana_petro))
+           summarise(predicha = mean(p_dpto) , observada = mean(gana_petro))
 plot(calibra$predicha , calibra$observada , type="b" , pch=16 , col="red" ,
      xlim=c(0,1) , ylim=c(0,1) , xlab="probabilidad predicha (media del decil)" , ylab="fraccion que gano Petro")
 abline(a=0 , b=1 , lty=2 , col="gray")
 
 ## el brier es el mse de la semana 2 aplicado a probabilidades
-c(lasso = mean((test$p_lasso - test$gana_petro)^2) ,
-  knn = mean((test$p_knn - test$gana_petro)^2) ,
+c(logistica = mean((test$p_dpto - test$gana_petro)^2) ,
+  lpm = mean((test$p_lpm - test$gana_petro)^2) ,
   prevalencia = mean((mean(train$gana_petro) - test$gana_petro)^2))
 
 ## 7.3. donde falla: los puestos renidos (el error de Bayes con datos)
 test %>%
-     mutate(acierto = as.integer((p_lasso >= 0.5)==(gana_petro==1)) ,
+     mutate(acierto = as.integer((p_dpto >= 0.5)==(gana_petro==1)) ,
             tramo = cut(abs(voto_petro - 50) , c(0 , 5 , 10 , 20 , 30 , 50) , include.lowest=T , right=F)) %>%
      group_by(tramo) %>%
      summarise(puestos = n() , exactitud = round(mean(acierto) , 2))
@@ -335,8 +272,7 @@ f_nueve <- gana_petro ~ educ_superior + estrato_bajo + estrato_alto + edad_20_29
 f_censo <- as.formula(paste("gana_petro ~" , paste(x_censo , collapse=" + ")))
 escalera <- data.frame(modelo = c("logistica, educacion superior","logistica, las nueve variables",
                                   "logistica, las 37 del censo","logistica, censo + dummies de departamento",
-                                  "lpm con lasso, censo x departamento","logistica con las seleccionadas",
-                                  "lasso logistico, censo x departamento","k-nn en el mapa"),
+                                  "lpm, censo + dummies de departamento"),
                        auc_test = NA , exactitud = NA , brier = NA)
 p_lista <- list()
 for (i in 1:3){
@@ -346,10 +282,7 @@ for (i in 1:3){
 }
 p_lista[[4]] <- test$p_dpto
 p_lista[[5]] <- test$p_lpm
-p_lista[[6]] <- test$p_sel
-p_lista[[7]] <- test$p_lasso
-p_lista[[8]] <- test$p_knn
-for (i in 1:8){
+for (i in 1:5){
      escalera$auc_test[i] <- auc(test$gana_petro , p_lista[[i]])
      escalera$exactitud[i] <- mean((p_lista[[i]] >= 0.5)==(test$gana_petro==1))
      escalera$brier[i] <- mean((p_lista[[i]] - test$gana_petro)^2)

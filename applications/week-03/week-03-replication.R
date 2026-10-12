@@ -1,6 +1,8 @@
 ## Big Data y Machine Learning para Economia Aplicada
-## week-03: validacion cruzada y regularizacion (el juez y la perilla)
-## Last run: Sep 29, 2026
+## week-03-replication: replica todas las cifras de las diapositivas de la semana 3
+## (validacion cruzada y regularizacion: el juez y la perilla). La aplicacion corta
+## de clase es week-03-application.R
+## Last run: Oct 8, 2026
 
 ##==: 0. initial setup :==##
 
@@ -353,10 +355,10 @@ plot(glmnet(z_gemela , y_train , alpha=0.5 , standardize=F) , xvar="lambda" , ma
 par(mfrow=c(1,1))
 
 ##============================================================================##
-##  PARTE C. EL PAIS: censo x departamento, y el juez de la pregunta del uso  ##
+##  PARTE C. EL PAIS: censo + departamento, y el juez de la pregunta del uso  ##
 ##============================================================================##
 
-##==: 7. el pais: censo x departamento, 1.291 columnas :==##
+##==: 7. el pais: censo + dummies de departamento :==##
 
 ## 7.1. la particion fija del curso: 9.602 puestos para aprender, 2.398 bajo llave
 train_p <- db %>% subset(muestra=="entrenamiento")
@@ -386,59 +388,47 @@ for (d in 1:length(dptos)){
 pendientes %>% arrange(desc(n)) %>% mutate(b = round(b,2) , ee = round(ee,2)) %>% head(8)
 
 ## el embudo: con pocos puestos la pendiente es ruido; con muchos, es precisa y distinta
+## (la salida barata de la clase: una dummy por departamento mueve el nivel, no la
+## pendiente; escribir las pendientes a mano serian 37 x 33 columnas mas y no lo hacemos)
 plot(log(pendientes$n) , pendientes$b , pch=16 , col="blue" , ylim=c(-6,2) ,
      xlab="log de los puestos del departamento" , ylab="pendiente de la educacion superior")
 abline(h=coef(recta_p)[2] , lty=2)
 
-## 7.4. el censo x departamento: 37 efectos nacionales + 33 constantes + 37 x 33 desviaciones
-## (una columna por departamento, sin categoria de referencia: cada uno se encoge hacia lo nacional)
-nombres <- c(x_censo , paste0("dpto:" , dptos) , paste0(rep(x_censo , each=length(dptos)) , ":" , dptos))
-x_larga <- matrix(0 , nrow(train_p) , length(nombres) , dimnames=list(NULL , nombres))
-x_larga_test <- matrix(0 , nrow(test_p) , length(nombres) , dimnames=list(NULL , nombres))
-x_larga[,x_censo] <- as.matrix(train_p[,x_censo])
-x_larga_test[,x_censo] <- as.matrix(test_p[,x_censo])
+## 7.4. censo + departamento: los 37 efectos nacionales y las 33 dummies (una columna
+## por departamento, sin categoria de referencia: si se penaliza, cada departamento
+## se encoge hacia lo nacional)
+nombres <- c(x_censo , paste0("dpto:" , dptos))
+x_corta <- matrix(0 , nrow(train_p) , length(nombres) , dimnames=list(NULL , nombres))
+x_corta_test <- matrix(0 , nrow(test_p) , length(nombres) , dimnames=list(NULL , nombres))
+x_corta[,x_censo] <- as.matrix(train_p[,x_censo])
+x_corta_test[,x_censo] <- as.matrix(test_p[,x_censo])
 for (d in dptos){
-     x_larga[,paste0("dpto:",d)] <- as.numeric(train_p$departamento==d)
-     x_larga_test[,paste0("dpto:",d)] <- as.numeric(test_p$departamento==d)
-     for (v in x_censo){
-          x_larga[,paste0(v,":",d)] <- train_p[[v]]*(train_p$departamento==d)
-          x_larga_test[,paste0(v,":",d)] <- test_p[[v]]*(test_p$departamento==d)
-     }
+     x_corta[,paste0("dpto:",d)] <- as.numeric(train_p$departamento==d)
+     x_corta_test[,paste0("dpto:",d)] <- as.numeric(test_p$departamento==d)
 }
-dim(x_larga)
+dim(x_corta)
 
 ## 7.5. los 10 pliegues del pais (semilla 2026): los mismos para todos los modelos
 set.seed(2026)
 pliegue_p <- sample(rep(1:10 , length.out=nrow(train_p)))
 
-## 7.6. ols con las 1.291 columnas: dentro casi perfecto, fuera se desploma (tarda cerca de un minuto)
-ols_larga <- lm.fit(cbind(1 , x_larga) , train_p$voto_petro)
-b_larga <- ols_larga$coefficients
-b_larga[is.na(b_larga)] <- 0
-error2 <- rep(NA , nrow(train_p))
-for (j in 1:10){
-     b_j <- lm.fit(cbind(1 , x_larga[pliegue_p!=j,]) , train_p$voto_petro[pliegue_p!=j])$coefficients
-     b_j[is.na(b_j)] <- 0
-     error2[pliegue_p==j] <- (train_p$voto_petro[pliegue_p==j] - cbind(1 , x_larga[pliegue_p==j,]) %*% b_j)^2
-}
-rmse_cv_ols_larga <- sqrt(mean(error2))
-c(rmse_train = sqrt(mean((train_p$voto_petro - cbind(1 , x_larga) %*% b_larga)^2)) ,
-  rmse_cv = rmse_cv_ols_larga ,
-  rmse_test = sqrt(mean((test_p$voto_petro - cbind(1 , x_larga_test) %*% b_larga)^2)))
+## 7.6. ridge, lasso y elastic net sobre censo + departamento, con los mismos pliegues
+## (la grilla se alarga por abajo: con 9.602 filas y 70 columnas el juez busca
+## lambda cerca de cero; cada juez tarda unos segundos)
+ridge_p <- cv.glmnet(x=x_corta , y=train_p$voto_petro , alpha=0 , foldid=pliegue_p , lambda.min.ratio=1e-8 , nlambda=150)
+lasso_p <- cv.glmnet(x=x_corta , y=train_p$voto_petro , alpha=1 , foldid=pliegue_p , lambda.min.ratio=1e-8 , nlambda=150)
+en_p <- cv.glmnet(x=x_corta , y=train_p$voto_petro , alpha=0.5 , foldid=pliegue_p , lambda.min.ratio=1e-8 , nlambda=150)
 
-## 7.7. ridge, lasso y elastic net con los mismos pliegues (cada juez tarda unos minutos)
-ridge_p <- cv.glmnet(x=x_larga , y=train_p$voto_petro , alpha=0 , foldid=pliegue_p , lambda.min.ratio=1e-7 , nlambda=150)
-lasso_p <- cv.glmnet(x=x_larga , y=train_p$voto_petro , alpha=1 , foldid=pliegue_p)
-en_p <- cv.glmnet(x=x_larga , y=train_p$voto_petro , alpha=0.5 , foldid=pliegue_p)
+## mira: la curva del juez solo sube hacia la derecha: cualquier precio empeora
 plot(lasso_p)
 
-## 7.8. la tabla del pais: la media, las lineales de siempre y las penalizadas
+## 7.7. la tabla del pais: la media, las lineales de siempre y las penalizadas
 f_dpto <- update(f_censo , . ~ . + departamento)
 modelo_censo_p <- lm(f_censo , data=train_p)
 modelo_dpto_p <- lm(f_dpto , data=train_p)
 tabla_pais <- data.frame(modelo = c("media del train (baseline)","recta (educacion superior)","las 37 del censo",
-                                    "censo + dummies de departamento","ols, censo x departamento","ridge, censo x departamento",
-                                    "lasso, censo x departamento","elastic net, censo x departamento"),
+                                    "censo + dummies de departamento","ridge (lambda min)",
+                                    "lasso (lambda min)","elastic net (lambda min)","lasso (regla 1-se)"),
                          coeficientes = NA , rmse_train = NA , rmse_cv = NA , rmse_test = NA)
 
 ## las lineales, con los mismos 10 pliegues
@@ -456,54 +446,44 @@ for (i in 1:4){
      tabla_pais$rmse_test[i] <- sqrt(mean((test_p$voto_petro - predict(modelo_i , test_p))^2))
 }
 
-## la fila de ols con las 1.291 columnas (ya calculada en 7.6)
-tabla_pais[5,2:5] <- c(sum(!is.na(ols_larga$coefficients)) - 1 , sqrt(mean((train_p$voto_petro - cbind(1 , x_larga) %*% b_larga)^2)) ,
-                       rmse_cv_ols_larga , sqrt(mean((test_p$voto_petro - cbind(1 , x_larga_test) %*% b_larga)^2)))
-
-## las penalizadas, con el lambda minimo de cada juez
-penalizados_p <- list(ridge_p , lasso_p , en_p)
-for (i in 1:3){
+## las penalizadas, con el lambda minimo de cada juez (y el lasso tambien con 1-se)
+penalizados_p <- list(ridge_p , lasso_p , en_p , lasso_p)
+lambdas_p <- c("lambda.min" , "lambda.min" , "lambda.min" , "lambda.1se")
+for (i in 1:4){
      modelo_i <- penalizados_p[[i]]
-     indice <- which.min(abs(modelo_i$lambda - modelo_i$lambda.min))
-     tabla_pais$coeficientes[i+5] <- modelo_i$nzero[indice]
-     tabla_pais$rmse_train[i+5] <- sqrt(mean((train_p$voto_petro - predict(modelo_i , x_larga , s="lambda.min"))^2))
-     tabla_pais$rmse_cv[i+5] <- sqrt(modelo_i$cvm[indice])
-     tabla_pais$rmse_test[i+5] <- sqrt(mean((test_p$voto_petro - predict(modelo_i , x_larga_test , s="lambda.min"))^2))
+     indice <- which.min(abs(modelo_i$lambda - modelo_i[[lambdas_p[i]]]))
+     tabla_pais$coeficientes[i+4] <- modelo_i$nzero[indice]
+     tabla_pais$rmse_train[i+4] <- sqrt(mean((train_p$voto_petro - predict(modelo_i , x_corta , s=lambdas_p[i]))^2))
+     tabla_pais$rmse_cv[i+4] <- sqrt(modelo_i$cvm[indice])
+     tabla_pais$rmse_test[i+4] <- sqrt(mean((test_p$voto_petro - predict(modelo_i , x_corta_test , s=lambdas_p[i]))^2))
 }
+
+## mira: las dummies compran 4 puntos (19,8 -> 15,6) y las cuatro filas penalizadas
+## empatan con ols: la perilla paga cuando las columnas compiten con las filas
+## (la parte B, 37 para 257), no aqui (70 para 9.602)
 tabla_pais %>% mutate(rmse_train = round(rmse_train,1) , rmse_cv = round(rmse_cv,1) , rmse_test = round(rmse_test,1))
 
-## 7.9. el juez pliegue por pliegue: ridge acierta en la prueba, pero se dispara en algunos pliegues
-por_pliegue <- data.frame(pliegue = 1:10 , ridge = NA , lasso = NA)
-for (j in 1:10){
-     ridge_j <- glmnet(x_larga[pliegue_p!=j,] , train_p$voto_petro[pliegue_p!=j] , alpha=0 , lambda=ridge_p$lambda.min)
-     lasso_j <- glmnet(x_larga[pliegue_p!=j,] , train_p$voto_petro[pliegue_p!=j] , alpha=1 , lambda=lasso_p$lambda.min)
-     por_pliegue$ridge[j] <- sqrt(mean((train_p$voto_petro[pliegue_p==j] - predict(ridge_j , x_larga[pliegue_p==j,]))^2))
-     por_pliegue$lasso[j] <- sqrt(mean((train_p$voto_petro[pliegue_p==j] - predict(lasso_j , x_larga[pliegue_p==j,]))^2))
-}
-por_pliegue %>% arrange(desc(ridge))
+## 7.8. el precio del juez queda en el borde chico de la grilla, y el lasso casi no apaga
+## mira: lambda minuscula, y lo poco que sale son columnas gemelas (los logaritmos
+## de viviendas y de manzanas cuentan casi lo mismo que el de poblacion)
+c(ridge = ridge_p$lambda.min , lasso = lasso_p$lambda.min , en = en_p$lambda.min)
+coef_min <- coef(lasso_p , s="lambda.min")
+setdiff(colnames(x_corta) , rownames(coef_min)[coef_min[,1]!=0])
+coef_1se <- coef(lasso_p , s="lambda.1se")
+setdiff(colnames(x_corta) , rownames(coef_1se)[coef_1se[,1]!=0])
 
-## el peor pliegue de ridge: de donde sale su error (unos pocos puestos de san andres)
-peor <- which.max(por_pliegue$ridge)
-ridge_peor <- glmnet(x_larga[pliegue_p!=peor,] , train_p$voto_petro[pliegue_p!=peor] , alpha=0 , lambda=ridge_p$lambda.min)
-train_p[pliegue_p==peor,] %>%
-     mutate(error2 = (voto_petro - as.numeric(predict(ridge_peor , x_larga[pliegue_p==peor,])))^2) %>%
-     group_by(departamento) %>%
-     summarise(puestos = n() , parte_del_error = sum(error2)) %>%
-     mutate(parte_del_error = round(parte_del_error/sum(parte_del_error)*100,1)) %>%
-     arrange(desc(parte_del_error)) %>%
-     head(3)
-
-## 7.10. la ventaja del lasso sobre censo + dummies de departamento: 2.000 remuestras de la prueba
-test_p$voto_pred <- as.numeric(predict(lasso_p , x_larga_test , s="lambda.min"))
-pred_dpto <- predict(modelo_dpto_p , test_p)
+## 7.9. la ventaja de las dummies sobre las 37 solas: 2.000 remuestras de la prueba
+test_p$voto_pred <- as.numeric(predict(modelo_dpto_p , test_p))
+pred_censo <- predict(modelo_censo_p , test_p)
 set.seed(2026)
 dif <- rep(NA , 2000)
 for (b in 1:2000){
      i <- sample(nrow(test_p) , replace=T)
-     dif[b] <- sqrt(mean((test_p$voto_petro[i] - test_p$voto_pred[i])^2)) - sqrt(mean((test_p$voto_petro[i] - pred_dpto[i])^2))
+     dif[b] <- sqrt(mean((test_p$voto_petro[i] - test_p$voto_pred[i])^2)) - sqrt(mean((test_p$voto_petro[i] - pred_censo[i])^2))
 }
 
-## el intervalo de la diferencia queda entero por debajo de cero: la ventaja no es suerte de la prueba
+## el intervalo de la diferencia queda entero por debajo de cero: la ventaja del
+## departamento no es suerte de la prueba
 quantile(dif , c(0.025,0.975))
 
 ## target predicho vs target original, y la diagonal
@@ -525,7 +505,7 @@ x_media <- matrix(1 , nrow(train_p) , 1)
 x_censo_p <- cbind(1 , as.matrix(train_p[,x_censo]))
 x_dpto <- cbind(1 , as.matrix(train_p[,x_censo]) , model.matrix(~ departamento , train_p)[,-1])
 matrices <- list(x_media , x_censo_p , x_dpto)
-esquemas <- data.frame(modelo = c("media del train","las 37 del censo","censo + dummies de departamento","lasso, censo x departamento","k-nn en el mapa"),
+esquemas <- data.frame(modelo = c("media del train","las 37 del censo","censo + dummies de departamento","k-nn en el mapa"),
                        al_azar = NA , por_municipio = NA)
 for (i in 1:3){
      for (esquema in c("al_azar","por_municipio")){
@@ -539,10 +519,6 @@ for (i in 1:3){
           esquemas[i,esquema] <- sqrt(mean(error2))
      }
 }
-
-## el lasso del censo x departamento, validado por municipio (tarda un par de minutos)
-lasso_m <- cv.glmnet(x=x_larga , y=train_p$voto_petro , alpha=1 , foldid=pliegue_m)
-esquemas[4,2:3] <- c(sqrt(min(lasso_p$cvm)) , sqrt(min(lasso_m$cvm)))
 
 ## k-nn en el mapa del pais: el juez al azar elige k, y el juez por municipio lo evalua en municipios nuevos
 coord_p <- as.matrix(train_p[,c("lon","lat")])
@@ -558,7 +534,7 @@ for (esquema in c("al_azar","por_municipio")){
      knn_p[,esquema] <- sqrt(colMeans(error2))
 }
 k_pais <- knn_p$k[which.min(knn_p$al_azar)]
-esquemas[5,2:3] <- c(min(knn_p$al_azar) , knn_p$por_municipio[knn_p$k==k_pais])
+esquemas[4,2:3] <- c(min(knn_p$al_azar) , knn_p$por_municipio[knn_p$k==k_pais])
 
 ## al azar: completar el mapa de un municipio que ya conozco; por municipio: predecir uno nuevo
 esquemas %>% mutate(aumento = round(por_municipio - al_azar,1) , al_azar = round(al_azar,1) , por_municipio = round(por_municipio,1))

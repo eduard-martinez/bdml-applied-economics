@@ -1,6 +1,8 @@
 ## Big Data y Machine Learning para Economia Aplicada
-## week-05: arboles, bosques y boosting (partir, promediar y corregir)
-## Last run: Sep 25, 2026
+## week-05-replication: replica todas las cifras de las diapositivas de la semana 5
+## (arboles, bosques y boosting: partir, promediar y corregir). La aplicacion corta
+## de clase es week-05-application.R
+## Last run: Oct 8, 2026
 
 ##==: 0. initial setup :==##
 
@@ -9,7 +11,7 @@ rm(list=ls())
 
 ## load/install packages
 require(pacman)
-p_load(rio , dplyr , rpart , randomForest , xgboost , glmnet , doParallel)
+p_load(rio , dplyr , rpart , randomForest , xgboost , doParallel)
 
 ## cluster: los bosques y el boosting se ajustan en paralelo, cada tarea con su semilla (mismo resultado, menos tiempo)
 cores <- parallel::detectCores()
@@ -23,8 +25,8 @@ url <- "https://raw.githubusercontent.com/eduard-martinez/bdml-applied-economics
 puestos <- import("input/puestos_colombia_2022.rds" , trust=T)
 censo <- import("input/censo_puestos_2022.rds" , trust=T)
 
-## 1.2. la ficha del censo de la semana 3: de conteos a proporciones (una categoria por bloque queda por fuera)
-ficha <- censo %>%
+## 1.2. las 37 del censo de la semana 3: de conteos a proporciones (una categoria por bloque queda por fuera)
+censo37 <- censo %>%
          mutate(con_nivel = educ_ninguna + educ_basica + educ_tecnica + educ_superior,
                 con_etnia = etnia_ninguna + indigena + rom + raizal + palenquero + afro) %>%
          transmute(puesto,
@@ -49,21 +51,21 @@ ficha <- censo %>%
                    log_distancia = log(1 + distancia_media) ,
                    desfase = pmin(pmax(desfase , -100) , 300))
 
-## 1.3. la base: el puesto, los dos targets de siempre y la ficha; el departamento como una sola variable
+## 1.3. la base: el puesto, los dos targets de siempre y las 37 del censo; el departamento como una sola variable
 db <- puestos %>%
       select(puesto , nombre , departamento , municipio , cod_municipio , zona , lon , lat , registrados ,
              voto_petro , gana_petro , muestra) %>%
-      inner_join(ficha , by="puesto") %>%
+      inner_join(censo37 , by="puesto") %>%
       mutate(log_registrados = log(registrados) , rural = as.integer(zona=="rural") ,
              dpto = factor(departamento)) %>%
       subset(!is.na(educ_superior) & !is.na(afro))
 nrow(db)
 
-## 1.4. los ingredientes de hoy: la ficha de 37, la ficha con el departamento, y todo con las coordenadas
-x_ficha <- c(setdiff(names(ficha) , "puesto") , "log_registrados" , "rural")
-x_dpto <- c(x_ficha , "dpto")
-x_todo <- c(x_ficha , "dpto" , "lon" , "lat")
-length(x_ficha)
+## 1.4. los ingredientes de hoy: las 37 del censo, el censo con el departamento, y todo con las coordenadas
+x_censo <- c(setdiff(names(censo37) , "puesto") , "log_registrados" , "rural")
+x_dpto <- c(x_censo , "dpto")
+x_todo <- c(x_censo , "dpto" , "lon" , "lat")
+length(x_censo)
 
 ## 1.5. cali y su area metropolitana: la particion de la semana 2 (semilla 2026, 25% a la prueba)
 df <- db %>% subset(departamento=="VALLE" & municipio %in% c("CALI","PALMIRA","YUMBO","JAMUNDI"))
@@ -210,14 +212,14 @@ mapa_cv <- prune(arbol_mapa , cp=arbol_mapa$cptable[fila_mapa,"CP"])
 c(hojas = arbol_mapa$cptable[fila_mapa,"nsplit"] + 1 ,
   rmse_test = sqrt(mean((test_p$voto_petro - predict(mapa_cv , test_p))^2)))
 
-##==: 5. un corte dentro de otro: el arbol de la ficha :==##
+##==: 5. un corte dentro de otro: el arbol del censo :==##
 
 ## 5.1. la formula con las 37 variables; en la raiz hay miles de cortes candidatos, y se prueban todos
-f_ficha <- as.formula(paste0("voto_petro ~ " , paste(x_ficha , collapse=" + ")))
-sum(sapply(train_p[,x_ficha] , function(x) length(unique(x)) - 1))
+f_censo <- as.formula(paste0("voto_petro ~ " , paste(x_censo , collapse=" + ")))
+sum(sapply(train_p[,x_censo] , function(x) length(unique(x)) - 1))
 
 ## 5.2. el arbol grande (hojas de al menos 7 puestos) y su version de seis hojas
-arbol_g <- rpart(f_ficha , data=train_p , control=rpart.control(cp=0 , minsplit=20 , xval=pliegue_p))
+arbol_g <- rpart(f_censo , data=train_p , control=rpart.control(cp=0 , minsplit=20 , xval=pliegue_p))
 arbol_6 <- prune(arbol_g , cp=arbol_g$cptable[arbol_g$cptable[,"nsplit"]==5,"CP"])
 arbol_6
 
@@ -230,15 +232,15 @@ test_p$voto_pred <- predict(arbol_6 , test_p)
 test_p %>% select(nombre , departamento , voto_petro , voto_pred) %>% head(5)
 
 ## 5.3. el departamento entra entero, sin dummies: el primer corte junta a los 33 en dos bloques
-f_dpto <- update(f_ficha , . ~ . + dpto)
+f_dpto <- update(f_censo , . ~ . + dpto)
 arbol_d <- rpart(f_dpto , data=train_p , control=rpart.control(cp=0 , minsplit=20 , xval=pliegue_p))
 prune(arbol_d , cp=arbol_d$cptable[2,"CP"])
 
 ##==: 6. gana_petro: la hoja da una probabilidad :==##
 
 ## 6.1. el arbol de clasificacion: el mismo corte, con el indice de gini
-f_ficha_c <- as.formula(paste0("factor(gana_petro) ~ " , paste(x_ficha , collapse=" + ")))
-arbol_c <- rpart(f_ficha_c , data=train_p , method="class" , control=rpart.control(cp=0.01 , xval=0))
+f_censo_c <- as.formula(paste0("factor(gana_petro) ~ " , paste(x_censo , collapse=" + ")))
+arbol_c <- rpart(f_censo_c , data=train_p , method="class" , control=rpart.control(cp=0.01 , xval=0))
 arbol_c
 
 ## 6.2. la cuenta a mano en la raiz: la proporcion que gana, el gini y el error
@@ -282,11 +284,11 @@ abline(v=poda$hojas[c(fila_min , fila_1se)] , lty=3)
 
 ##==: 8. arboles contra rectas :==##
 
-## 8.1. las rectas de la semana 3 con los mismos 10 pliegues: la media, la ficha y la ficha con departamentos
-f_ols_dpto <- update(f_ficha , . ~ . + departamento)
-lineales <- data.frame(modelo = c("media del train" , "ols, la ficha de 37" , "ols, ficha + departamentos") ,
+## 8.1. las rectas de la semana 3 con los mismos 10 pliegues: la media, las 37 del censo y censo + departamentos
+f_ols_dpto <- update(f_censo , . ~ . + departamento)
+lineales <- data.frame(modelo = c("media del train" , "ols, las 37 del censo" , "ols, censo + departamentos") ,
                        rmse_cv = NA , rmse_test = NA)
-formulas <- list(voto_petro ~ 1 , f_ficha , f_ols_dpto)
+formulas <- list(voto_petro ~ 1 , f_censo , f_ols_dpto)
 for (i in 1:3){
      error2 <- rep(NA , nrow(train_p))
      for (j in 1:10){
@@ -298,32 +300,11 @@ for (i in 1:3){
 }
 lineales
 
-## 8.2. el lasso de la semana 3: las 1.291 columnas escritas a mano (37 nacionales + 33 constantes + 37 x 33 desviaciones)
-dptos <- levels(train_p$dpto)
-nombres <- c(x_ficha , paste0("dpto:" , dptos) , paste0(rep(x_ficha , each=length(dptos)) , ":" , dptos))
-x_larga <- matrix(0 , nrow(train_p) , length(nombres) , dimnames=list(NULL , nombres))
-x_larga_test <- matrix(0 , nrow(test_p) , length(nombres) , dimnames=list(NULL , nombres))
-x_larga[,x_ficha] <- as.matrix(train_p[,x_ficha])
-x_larga_test[,x_ficha] <- as.matrix(test_p[,x_ficha])
-for (d in dptos){
-     x_larga[,paste0("dpto:",d)] <- as.numeric(train_p$departamento==d)
-     x_larga_test[,paste0("dpto:",d)] <- as.numeric(test_p$departamento==d)
-     for (v in x_ficha){
-          x_larga[,paste0(v,":",d)] <- train_p[[v]]*(train_p$departamento==d)
-          x_larga_test[,paste0(v,":",d)] <- test_p[[v]]*(test_p$departamento==d)
-     }
-}
-
-## el juez elige lambda con los mismos pliegues (en paralelo: cerca de un minuto)
-lasso_p <- cv.glmnet(x=x_larga , y=train_p$voto_petro , alpha=1 , foldid=pliegue_p , parallel=T)
-c(rmse_cv = sqrt(min(lasso_p$cvm)) ,
-  rmse_test = sqrt(mean((test_p$voto_petro - predict(lasso_p , x_larga_test , s="lambda.min"))^2)))
-
-## 8.3. un arbol podado por el juez con cada juego de ingredientes, y el del mapa
+## 8.2. un arbol podado por el juez con cada juego de ingredientes, y el del mapa
 f_todo <- update(f_dpto , . ~ . + lon + lat)
 arbol_t <- rpart(f_todo , data=train_p , control=rpart.control(cp=0 , minsplit=20 , xval=pliegue_p))
-arboles <- data.frame(modelo = c("arbol, la ficha" , "arbol, ficha + departamento" ,
-                                 "arbol, ficha + departamento + coordenadas" , "arbol, el mapa") ,
+arboles <- data.frame(modelo = c("arbol, las 37 del censo" , "arbol, censo + departamento" ,
+                                 "arbol, censo + departamento + coordenadas" , "arbol, el mapa") ,
                       hojas = NA , rmse_cv = NA , rmse_test = NA)
 lista_arboles <- list(arbol_g , arbol_d , arbol_t , arbol_mapa)
 for (i in 1:4){
@@ -340,19 +321,27 @@ lineales[2:3,]
 
 ##==: 9. el problema del arbol: su varianza :==##
 
-## 9.1. veinte remuestras bootstrap del entrenamiento, con el precio por hoja que eligio el juez
+## 9.1. veinte remuestras bootstrap del entrenamiento, con el precio por hoja que
+## eligio el juez; la recta del pais (censo + dummies) corre en las mismas remuestras
+## para comparar su varianza (un departamento ausente de la remuestra queda en cero)
 cp_min <- arbol_g$cptable[fila_min,"CP"]
+x_lin <- cbind(1 , as.matrix(train_p[,x_censo]) , model.matrix(~ dpto , train_p)[,-1])
+x_lin_t <- cbind(1 , as.matrix(test_p[,x_censo]) , model.matrix(~ dpto , test_p)[,-1])
 boot <- data.frame(b = 1:20 , raiz = NA , segundo = NA , rmse_test = NA)
 pred_boot <- matrix(NA , nrow(test_p) , 20)
+pred_lineal <- matrix(NA , nrow(test_p) , 20)
 set.seed(2026)
 for (b in 1:20){
      i <- sample(nrow(train_p) , replace=T)
-     arbol_b <- rpart(f_ficha , data=train_p[i,] , control=rpart.control(cp=cp_min , minsplit=20 , xval=0))
+     arbol_b <- rpart(f_censo , data=train_p[i,] , control=rpart.control(cp=cp_min , minsplit=20 , xval=0))
      boot$raiz[b] <- as.character(arbol_b$frame$var[1])
      boot$segundo[b] <- paste(arbol_b$frame$var[rownames(arbol_b$frame)=="2"] ,
                               arbol_b$frame$var[rownames(arbol_b$frame)=="3"] , sep=" / ")
      pred_boot[,b] <- predict(arbol_b , test_p)
      boot$rmse_test[b] <- sqrt(mean((test_p$voto_petro - pred_boot[,b])^2))
+     b_lin <- lm.fit(x_lin[i,] , train_p$voto_petro[i])$coefficients
+     b_lin[is.na(b_lin)] <- 0
+     pred_lineal[,b] <- x_lin_t %*% b_lin
 }
 
 ## el primer corte es estable; lo de abajo cambia; cada arbol solo predice mal
@@ -361,7 +350,9 @@ table(boot$segundo)
 range(boot$rmse_test)
 
 ## 9.2. cuanto se mueve la prediccion de un puesto de un arbol a otro, y el promedio de los veinte
+## mira: el arbol se mueve mucho; la recta del pais, en el mismo ejercicio, casi nada
 median(apply(pred_boot , 1 , sd))
+median(apply(pred_lineal , 1 , sd))
 sqrt(mean((test_p$voto_petro - rowMeans(pred_boot))^2))
 
 ##==: 10. el bosque: promediar arboles hechos sobre remuestras :==##
@@ -371,9 +362,9 @@ sqrt(mean((test_p$voto_petro - rowMeans(pred_boot))^2))
 grid_m <- data.frame(m = c(1,2,4,6,9,12,18,25,37) , rmse_oob = NA , rmse_test = NA , cor_arboles = NA , rmse_arbol = NA)
 bosques <- foreach(i = 1:nrow(grid_m) , .packages="randomForest") %dopar% {
            set.seed(2026)
-           bosque <- randomForest(x=train_p[,x_ficha] , y=train_p$voto_petro , ntree=300 , mtry=grid_m$m[i] ,
-                                  xtest=test_p[,x_ficha] , ytest=test_p$voto_petro , keep.forest=T)
-           arbol_a_arbol <- predict(bosque , test_p[,x_ficha] , predict.all=T)$individual
+           bosque <- randomForest(x=train_p[,x_censo] , y=train_p$voto_petro , ntree=300 , mtry=grid_m$m[i] ,
+                                  xtest=test_p[,x_censo] , ytest=test_p$voto_petro , keep.forest=T)
+           arbol_a_arbol <- predict(bosque , test_p[,x_censo] , predict.all=T)$individual
            correlacion <- cor(arbol_a_arbol)
            list(curva_oob = sqrt(bosque$mse) ,
                 curva_test = sqrt(bosque$test$mse) ,
@@ -495,12 +486,12 @@ cv_xgb <- function(x , y , pliegues , objetivo , d , eta , rondas=10000 , parada
           return(list(rondas=mejor , oof=oof , log=cv$evaluation_log , parametros=parametros))
 }
 
-## 13.2. la ficha con d = 6 (el valor por defecto de xgboost): tasa 0,3 contra 0,05, 2.000 rondas sin parar
+## 13.2. el censo con d = 6 (el valor por defecto de xgboost): tasa 0,3 contra 0,05, 2.000 rondas sin parar
 ## (en paralelo: un par de minutos)
-x_ficha_m <- as.matrix(train_p[,x_ficha])
-x_ficha_t <- as.matrix(test_p[,x_ficha])
+x_censo_m <- as.matrix(train_p[,x_censo])
+x_censo_t <- as.matrix(test_p[,x_censo])
 tasas <- foreach(eta = c(0.3 , 0.05) , .packages="xgboost") %dopar% {
-         cv_xgb(x_ficha_m , train_p$voto_petro , pliegues_p , "reg:squarederror" , 6 , eta , rondas=2000 , parada=F)
+         cv_xgb(x_censo_m , train_p$voto_petro , pliegues_p , "reg:squarederror" , 6 , eta , rondas=2000 , parada=F)
 }
 
 ## la mejor ronda, el error del juez en ella y en la ronda 2.000
@@ -519,15 +510,15 @@ plot(1:2000 , tasas[[1]]$log$train_rmse_mean , type="l" , log="x" , col="red" , 
 lines(1:2000 , tasas[[2]]$log$train_rmse_mean , col="blue" , lwd=2)
 par(mfrow=c(1,1))
 
-## 13.3. el boosting de la ficha: tasa 0,05 con las rondas que eligio el juez
+## 13.3. el boosting del censo: tasa 0,05 con las rondas que eligio el juez
 set.seed(2026)
-boost_ficha <- xgb.train(params=tasas[[2]]$parametros , data=xgb.DMatrix(x_ficha_m , label=train_p$voto_petro) ,
+boost_censo <- xgb.train(params=tasas[[2]]$parametros , data=xgb.DMatrix(x_censo_m , label=train_p$voto_petro) ,
                          nrounds=tasas[[2]]$rondas , verbose=0)
-sqrt(mean((test_p$voto_petro - predict(boost_ficha , xgb.DMatrix(x_ficha_t)))^2))
+sqrt(mean((test_p$voto_petro - predict(boost_censo , xgb.DMatrix(x_censo_t)))^2))
 
 ##==: 14. cuanto valen las interacciones: la profundidad de cada arbol :==##
 
-## 14.1. los ingredientes de la semana 3: la ficha y el departamento (33 columnas de ceros y unos para xgboost)
+## 14.1. los ingredientes de la semana 3: el censo y el departamento (33 columnas de ceros y unos para xgboost)
 x_dpto_m <- model.matrix(~ . - 1 , data=train_p[,x_dpto])
 x_dpto_t <- model.matrix(~ . - 1 , data=test_p[,x_dpto])
 dim(x_dpto_m)
@@ -543,14 +534,14 @@ for (i in 1:nrow(grid_d)){
 }
 grid_d
 
-## con d = 1 el modelo es aditivo (una curva por variable): queda donde la recta con departamentos
+## con d = 1 el modelo es aditivo (una curva por variable): queda donde la mejor
+## recta del pais (censo + dummies)
 plot(grid_d$d , grid_d$rmse_cv , type="b" , pch=16 , col="red" , ylim=c(12.5,16.5) ,
      xlab="d: profundidad de cada arbol" , ylab="rmse de cv")
-abline(h=lineales$rmse_cv[3] , lty=2 , col="gray50")
-abline(h=sqrt(min(lasso_p$cvm)) , lty=2 , col="blue")
+abline(h=lineales$rmse_cv[3] , lty=2 , col="blue")
 
-## lo que valen los cruces de la maquina (d = 1 contra d = 6) y los que escribimos a mano (ols con departamentos contra el lasso)
-c(maquina = grid_d$rmse_cv[1] - grid_d$rmse_cv[5] , a_mano = lineales$rmse_cv[3] - sqrt(min(lasso_p$cvm)))
+## lo que valen los cruces de la maquina: d = 1 (sin cruces) contra d = 6
+c(maquina = grid_d$rmse_cv[1] - grid_d$rmse_cv[5])
 
 ## 14.3. el boosting con d = 6 y con d = 1, en la prueba
 set.seed(2026)
@@ -568,7 +559,7 @@ test_p %>% select(nombre , departamento , voto_petro , voto_pred) %>% head(5)
 
 ##==: 15. la carrera: los ingredientes de la semana 3, el mapa y el promedio :==##
 
-## 15.1. los bosques con ficha + departamento y con todo (500 arboles, m = p/3), y los mismos para gana_petro
+## 15.1. los bosques con censo + departamento y con todo (500 arboles, m = p/3), y los mismos para gana_petro
 ## (m = raiz de p; la probabilidad es la fraccion de votos). en paralelo: un par de minutos
 grid_b <- data.frame(ingredientes = c("dpto","todo","dpto","todo") , target = c("voto","voto","gana","gana"))
 bosques_c <- foreach(i = 1:nrow(grid_b) , .packages="randomForest") %dopar% {
@@ -637,8 +628,8 @@ test_p$voto_pred <- pred_prom
 test_p %>% select(nombre , departamento , voto_petro , voto_pred) %>% head(5)
 
 ## 15.5. el juez al azar y por municipios: el mapa pierde mas cuando el municipio es nuevo
-juez_municipio <- data.frame(modelo = c("k-nn en el mapa (k = 7)" , "boosting, ficha + departamento" ,
-                                        "boosting, ficha + departamento + coordenadas" , "promedio: boosting sin mapa y k-nn") ,
+juez_municipio <- data.frame(modelo = c("k-nn en el mapa (k = 7)" , "boosting, censo + departamento" ,
+                                        "boosting, censo + departamento + coordenadas" , "promedio: boosting sin mapa y k-nn") ,
                              al_azar = c(sqrt(mean((train_p$voto_petro - oof_knn)^2)) ,
                                          sqrt(mean((train_p$voto_petro - jueces_d[[5]]$oof)^2)) ,
                                          sqrt(mean((train_p$voto_petro - jueces[[1]]$oof)^2)) ,
@@ -650,18 +641,17 @@ juez_municipio <- data.frame(modelo = c("k-nn en el mapa (k = 7)" , "boosting, f
 juez_municipio %>% mutate(aumento = round(por_municipio - al_azar,1) , al_azar = round(al_azar,1) , por_municipio = round(por_municipio,1))
 
 ## 15.6. la tabla de la carrera: rmse de cv (fuera de la bolsa en los bosques) y de prueba
-carrera <- data.frame(modelo = c(lineales$modelo , "lasso, 1.291 columnas a mano (semana 3)" , arboles$modelo ,
-                                 "bosque, la ficha (m = 12)" , "bosque, ficha + departamento" , "bosque, ficha + departamento + coordenadas" ,
-                                 "boosting, la ficha" , "boosting, ficha + departamento" , "boosting, ficha + departamento + coordenadas" ,
+carrera <- data.frame(modelo = c(lineales$modelo , arboles$modelo ,
+                                 "bosque, las 37 del censo (m = 12)" , "bosque, censo + departamento" , "bosque, censo + departamento + coordenadas" ,
+                                 "boosting, las 37 del censo" , "boosting, censo + departamento" , "boosting, censo + departamento + coordenadas" ,
                                  "k-nn en el mapa (k = 7)" , "promedio: boosting sin mapa y k-nn") ,
-                      rmse_cv = c(lineales$rmse_cv , sqrt(min(lasso_p$cvm)) , arboles$rmse_cv ,
+                      rmse_cv = c(lineales$rmse_cv , arboles$rmse_cv ,
                                   tail(bosque_f$curva_oob , 1) , bosques_c[[1]]$oob , bosques_c[[2]]$oob ,
                                   sqrt(mean((train_p$voto_petro - tasas[[2]]$oof)^2)) , juez_municipio$al_azar[2] , juez_municipio$al_azar[3] ,
                                   juez_municipio$al_azar[1] , juez_municipio$al_azar[4]) ,
-                      rmse_test = c(lineales$rmse_test ,
-                                    sqrt(mean((test_p$voto_petro - predict(lasso_p , x_larga_test , s="lambda.min"))^2)) , arboles$rmse_test ,
+                      rmse_test = c(lineales$rmse_test , arboles$rmse_test ,
                                     tail(bosque_f$curva_test , 1) , bosques_c[[1]]$test , bosques_c[[2]]$test ,
-                                    sqrt(mean((test_p$voto_petro - predict(boost_ficha , xgb.DMatrix(x_ficha_t)))^2)) ,
+                                    sqrt(mean((test_p$voto_petro - predict(boost_censo , xgb.DMatrix(x_censo_t)))^2)) ,
                                     sqrt(mean((test_p$voto_petro - pred_boost_dpto)^2)) ,
                                     sqrt(mean((test_p$voto_petro - predict(boost_todo , xgb.DMatrix(x_todo_t)))^2)) ,
                                     sqrt(mean((test_p$voto_petro - pred_knn)^2)) ,
@@ -678,8 +668,8 @@ auc <- function(y , p){
        return((sum(r[y==1]) - n1*(n1 + 1)/2)/(n1*n0))
 }
 
-## 16.2. un arbol de clasificacion con ficha + departamento, podado por el juez
-f_dpto_c <- update(f_ficha_c , . ~ . + dpto)
+## 16.2. un arbol de clasificacion con censo + departamento, podado por el juez
+f_dpto_c <- update(f_censo_c , . ~ . + dpto)
 arbol_cd <- rpart(f_dpto_c , data=train_p , method="class" , control=rpart.control(cp=0 , minsplit=20 , xval=pliegue_p))
 arbol_cd <- prune(arbol_cd , cp=arbol_cd$cptable[which.min(arbol_cd$cptable[,"xerror"]),"CP"])
 
@@ -695,7 +685,8 @@ set.seed(2026)
 boost_ct <- xgb.train(params=jueces_c[[2]]$parametros , data=xgb.DMatrix(x_todo_m , label=train_p$gana_petro) ,
                       nrounds=jueces_c[[2]]$rondas , verbose=0)
 
-## 16.4. k-nn de la semana 4 (k = 14): la fraccion de vecinos donde gano petro
+## 16.4. k-nn en el mapa: la fraccion de vecinos donde gano petro (k = 14, el que
+## maximiza la auc del juez de 10 pliegues, como el k = 7 de la regresion)
 p_knn <- knn_reg(coord_p , train_p$gana_petro , coord_t , 14)[,1]
 oof_knn_c <- rep(NA , nrow(train_p))
 for (j in 1:10){
