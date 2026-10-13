@@ -1,8 +1,9 @@
 ## Big Data y Machine Learning para Economia Aplicada
-## week-05-application: la aplicacion de clase. Un arbol que se puede leer, el bosque
-## que promedia y el boosting que corrige, contra el Lasso de la semana 3. La replica
-## completa de las diapositivas es week-05-replication.R
-## Last run: Oct 8, 2026
+## week-05-application: la aplicacion de clase. Cuatro modelos con las 37 variables del
+## censo: un arbol sencillo, un arbol muy profundo que se aprende el train de memoria,
+## un bosque aleatorio y un xgboost. La replica completa de las diapositivas es
+## week-05-replication.R
+## Last run: Oct 13, 2026
 
 ##==: 0. initial setup :==##
 
@@ -20,169 +21,147 @@ url <- "https://raw.githubusercontent.com/eduard-martinez/bdml-applied-economics
 puestos <- import("input/puestos_colombia_2022.rds" , trust=T)
 censo37 <- import("input/censo37_puestos_2022.rds" , trust=T)
 
-## 1.2. la base de hoy: el voto, las 37 del censo y el departamento como factor
-## (el arbol usa la variable de texto entera, sin dummies)
+## 1.2. la base de hoy: el voto por petro (%) de cada puesto y las 37 variables del censo
 db <- puestos %>%
-      select(puesto , nombre , municipio , departamento , voto_petro , muestra) %>%
+      select(puesto , nombre , departamento , voto_petro , muestra) %>%
       inner_join(censo37 , by="puesto") %>%
-      mutate(dpto = factor(departamento)) %>%
       subset(!is.na(educ_superior) & !is.na(afro))
-x_censo <- setdiff(names(censo37) , "puesto")
 
-## 1.3. split data (la particion fija del curso: 9.602 para aprender y 2.398 bajo llave)
-test <- db %>% subset(muestra=="prueba")
+## 1.3. los nombres de las 37 variables
+x_censo <- setdiff(names(censo37) , "puesto")
+length(x_censo)
+
+## 1.4. la formula que usan los arboles: voto_petro contra las 37
+f_censo <- as.formula(paste0("voto_petro ~ " , paste(x_censo , collapse=" + ")))
+
+## 1.5. split data (la particion fija del curso: 9.602 para aprender y 2.398 para probar)
 train <- db %>% subset(muestra=="entrenamiento")
+test <- db %>% subset(muestra=="prueba")
 c(train = nrow(train) , test = nrow(test))
 
-## 1.4. la referencia de siempre: la media del train deja 26,7 en la prueba
-sqrt(mean((test$voto_petro - mean(train$voto_petro))^2))
+## 1.6. la referencia: predecir todos los puestos con el promedio del train
+## mira: 27,3 en el train y 26,7 en el test. Todo lo que sigue se compara con esto
+rmse_train_media <- sqrt(mean((train$voto_petro - mean(train$voto_petro))^2))
+rmse_test_media <- sqrt(mean((test$voto_petro - mean(train$voto_petro))^2))
+c(train = rmse_train_media , test = rmse_test_media)
 
-##==: 2. el primer corte del pais :==##
+##==: 2. un arbol sencillo :==##
 
-## 2.1. la formula con las 37 del censo, y cuantos cortes candidatos hay en la raiz
-## (cada variable aporta tantos cortes como valores distintos tenga, menos uno)
-f_censo <- as.formula(paste0("voto_petro ~ " , paste(x_censo , collapse=" + ")))
-sum(sapply(train[,x_censo] , function(x) length(unique(x)) - 1))
+## 2.1. estimar el arbol con las opciones por defecto de rpart: solo acepta un corte
+## si mejora el ajuste al menos 1% (cp = 0.01)
+arbol <- rpart(f_censo , data=train)
 
-## 2.2. un arbol de un solo corte: la maquina prueba los 208.236 y se queda con el mejor
-## mira: corta la poblacion afro en 4,6%. A la izquierda quedan 7.508 puestos con voto
-## medio 47,3; a la derecha, 2.094 con 71,2. Nadie le dijo donde esta el pacifico
-arbol_1 <- rpart(f_censo , data=train , control=rpart.control(maxdepth=1 , cp=0 , xval=0))
-arbol_1
+## 2.2. el arbol en texto: cada fila es un nodo; las que terminan en * son hojas
+## mira: el primer corte es la poblacion afro en 4,6% (la lamina 9)
+arbol
 
-##==: 3. el arbol que se puede leer: seis hojas :==##
+## 2.3. el arbol dibujado: cada nodo es una pregunta de si o no; cada hoja, un promedio
+plot(arbol , uniform=T , margin=0.05)
+text(arbol , use.n=T , cex=0.7)
 
-## 3.1. crecer el arbol grande (hojas chicas, cp = 0) y podarlo a seis hojas, es decir
-## cinco cortes: el arbol de la lamina 9 (tarda unos segundos)
-arbol_g <- rpart(f_censo , data=train , control=rpart.control(cp=0 , minsplit=20 , xval=0))
-arbol_6 <- prune(arbol_g , cp=arbol_g$cptable[arbol_g$cptable[,"nsplit"]==5,"CP"])
-arbol_6
+## 2.4. cuantas hojas tiene
+## mira: 10 hojas
+sum(arbol$frame$var=="<leaf>")
 
-## 3.2. el dibujo: cada nodo es una pregunta de si o no; cada hoja, un promedio
-## mira: la indigena corta dos veces (una no linealidad) y el estrato 2 y el gas solo
-## aparecen en la rama con poca poblacion afro: interacciones que nadie escribio
-plot(arbol_6 , uniform=T , margin=0.05)
-text(arbol_6 , use.n=T , cex=0.7)
+## 2.5. predecir: a cada puesto le toca el promedio de su hoja
+train$pred_arbol <- predict(arbol , train)
+test$pred_arbol <- predict(arbol , test)
 
-## 3.3. la prediccion es el promedio de la hoja: siga un puesto por el dibujo
-## con sus valores de afro e indigena, y llegue a su voto_pred
-test$voto_pred <- predict(arbol_6 , test)
+## 2.6. target original vs target predicho
+test %>% select(nombre , departamento , afro , indigena , voto_petro , pred_arbol) %>% head(5)
+
+## 2.7. el rmse en el train y en el test
+## mira: 21,2 y 21,4. Casi iguales: este arbol no se aprendio nada de memoria
+rmse_train_arbol <- sqrt(mean((train$voto_petro - train$pred_arbol)^2))
+rmse_test_arbol <- sqrt(mean((test$voto_petro - test$pred_arbol)^2))
+c(train = rmse_train_arbol , test = rmse_test_arbol)
+
+##==: 3. un arbol muy profundo: se aprende el train de memoria :==##
+
+## 3.1. el mismo arbol sin frenos: acepta cualquier corte (cp = 0), parte grupos de
+## solo 2 puestos (minsplit = 2) y puede bajar 30 niveles (maxdepth = 30)
+arbol_grande <- rpart(f_censo , data=train ,
+                      control=rpart.control(cp=0 , minsplit=2 , minbucket=1 , maxdepth=30))
+
+## 3.2. cuantas hojas tiene
+## mira: 9.402 hojas para 9.602 puestos: casi una hoja por puesto
+sum(arbol_grande$frame$var=="<leaf>")
+
+## 3.3. predecir
+train$pred_grande <- predict(arbol_grande , train)
+test$pred_grande <- predict(arbol_grande , test)
+
+## 3.4. el rmse en el train y en el test
+## mira: en el train baja de 21,2 a 0,4: casi perfecto. En el test sube de 21,4 a
+## 22,7: empeora. Aprenderse el train de memoria no sirve para puestos nuevos
+rmse_train_grande <- sqrt(mean((train$voto_petro - train$pred_grande)^2))
+rmse_test_grande <- sqrt(mean((test$voto_petro - test$pred_grande)^2))
+c(train = rmse_train_grande , test = rmse_test_grande)
+
+##==: 4. bosque aleatorio :==##
+
+## 4.1. en vez de escoger un arbol, se promedian 300 arboles grandes. Cada arbol se
+## estima con una muestra distinta del train y en cada corte solo compiten 12 de las
+## 37 variables, sorteadas (mtry = 12). Tarda cerca de un minuto
+set.seed(2026)
+bosque <- randomForest(x=train[,x_censo] , y=train$voto_petro , ntree=300 , mtry=12)
+
+## 4.2. predecir: el promedio de lo que dicen los 300 arboles
+train$pred_bosque <- predict(bosque , train[,x_censo])
+test$pred_bosque <- predict(bosque , test[,x_censo])
+
+## 4.3. el rmse en el train y en el test
+## mira: 15,6 en el test, contra 21,4 del arbol sencillo y 22,7 del arbol profundo
+rmse_train_bosque <- sqrt(mean((train$voto_petro - train$pred_bosque)^2))
+rmse_test_bosque <- sqrt(mean((test$voto_petro - test$pred_bosque)^2))
+c(train = rmse_train_bosque , test = rmse_test_bosque)
+
+##==: 5. xgboost :==##
+
+## 5.1. xgboost no recibe un data.frame: hay que pasarle matrices de numeros
+x_train <- xgb.DMatrix(as.matrix(train[,x_censo]) , label=train$voto_petro)
+x_test <- xgb.DMatrix(as.matrix(test[,x_censo]))
+
+## 5.2. las tres decisiones del boosting: cuanto se suma de cada arbol (eta = 0.05),
+## que tan grande es cada arbol (max_depth = 6) y cuantas rondas (nrounds = 1167).
+## Ademas, cada arbol ve el 80% de los puestos y el 80% de las variables
+parametros <- xgb.params(objective="reg:squarederror" , eta=0.05 , max_depth=6 ,
+                         subsample=0.8 , colsample_bytree=0.8 , nthread=1)
+
+## 5.3. estimar: 1.167 arboles pequenos en fila, cada uno corrige lo que dejaron los
+## anteriores (las 1.167 rondas las eligio la validacion cruzada de la replica)
+set.seed(2026)
+boost <- xgb.train(params=parametros , data=x_train , nrounds=1167 , verbose=0)
+
+## 5.4. predecir: el promedio del train mas la suma de los 1.167 arboles
+train$pred_boost <- predict(boost , x_train)
+test$pred_boost <- predict(boost , x_test)
+
+## 5.5. el rmse en el train y en el test
+## mira: 15,7 en el test: empata con el bosque
+rmse_train_boost <- sqrt(mean((train$voto_petro - train$pred_boost)^2))
+rmse_test_boost <- sqrt(mean((test$voto_petro - test$pred_boost)^2))
+c(train = rmse_train_boost , test = rmse_test_boost)
+
+##==: 6. la tabla de hoy :==##
+
+## 6.1. target original vs target predicho por los cuatro modelos
 test %>%
-     select(nombre , departamento , afro , indigena , voto_petro , voto_pred) %>%
+     select(nombre , voto_petro , pred_arbol , pred_grande , pred_bosque , pred_boost) %>%
      mutate(across(where(is.numeric) , ~ round(.x,1))) %>%
      head(5)
 
-## el error de prueba del arbol de seis hojas
-sqrt(mean((test$voto_petro - test$voto_pred)^2))
+## 6.2. el rmse de cada modelo en el train y en el test
+## mira: el arbol profundo es el mejor en el train y el peor en el test; el bosque
+## y el xgboost son los unicos que bajan de 16 en el test
+tabla <- data.frame(modelo = c("promedio" , "arbol sencillo" , "arbol profundo" , "bosque" , "xgboost") ,
+                    rmse_train = c(rmse_train_media , rmse_train_arbol , rmse_train_grande ,
+                                   rmse_train_bosque , rmse_train_boost) ,
+                    rmse_test = c(rmse_test_media , rmse_test_arbol , rmse_test_grande ,
+                                  rmse_test_bosque , rmse_test_boost))
+tabla %>% mutate(rmse_train = round(rmse_train,1) , rmse_test = round(rmse_test,1))
 
-##==: 4. arboles malos, promedio bueno: el bosque :==##
-
-## 4.1. un arbol solo es inestable: entre remuestras del entrenamiento, la prediccion
-## de un puesto se mueve 9,2 puntos (lamina 13). La salida del bosque: promediar 500
-## arboles hondos, cada uno sobre una remuestra bootstrap y con m = 12 variables
-## candidatas por corte, para que no salgan todos iguales
-
-## 4.2. el bosque con las 37 del censo + el departamento (tarda un minuto largo)
-set.seed(2026)
-bosque <- randomForest(x=train[,c(x_censo,"dpto")] , y=train$voto_petro , ntree=500 , mtry=12 ,
-                       xtest=test[,c(x_censo,"dpto")] , ytest=test$voto_petro)
-
-## 4.3. la curva del promedio: el error de prueba segun cuantos arboles se promedian
-## mira: un arbol solo deja 19,8; con diez el promedio ya va en 13,6; los 500 dejan
-## 12,9. Mas arboles nunca empeoran el promedio
-curva <- sqrt(bosque$test$mse)
-round(curva[c(1,10,50,100,500)] , 1)
-plot(1:500 , curva , type="l" , log="x" , col="red" , lwd=2 ,
-     xlab="numero de arboles promediados" , ylab="rmse de prueba")
-
-## 4.4. el juez gratis: cada arbol deja fuera de su remuestra a un tercio de los
-## puestos, y ese error fuera de la bolsa casi calca el de la prueba sin gastar pliegues
-c(rmse_oob = sqrt(tail(bosque$mse,1)) , rmse_test = sqrt(tail(bosque$test$mse,1)))
-
-## target predicho vs target original
-test$voto_pred <- bosque$test$predicted
-test %>% select(nombre , departamento , voto_petro , voto_pred) %>% head(5)
-
-##==: 5. el boosting a mano: aprender despacio en cali :==##
-
-## 5.1. los 257 puestos de cali y su area metropolitana (la particion de la semana 2)
-metro <- db %>% subset(departamento=="VALLE" & municipio %in% c("CALI","PALMIRA","YUMBO","JAMUNDI"))
-set.seed(2026)
-prueba_m <- sample(x = nrow(metro) , round(nrow(metro)*0.25))
-test_m <- metro[prueba_m,]
-train_m <- metro[-prueba_m,]
-c(train = nrow(train_m) , test = nrow(test_m))
-
-## 5.2. el algoritmo 8.2 de isl con tocones (arboles de un solo corte) y tasa 0,1:
-## arrancar en la media, ajustar un tocon al residuo, sumarlo encogido y repetir
-lambda <- 0.1
-grilla <- data.frame(educ_superior = seq(0 , 60 , by=0.5))
-f_train <- rep(mean(train_m$voto_petro) , nrow(train_m))
-f_test <- rep(mean(train_m$voto_petro) , nrow(test_m))
-f_grilla <- rep(mean(train_m$voto_petro) , nrow(grilla))
-aprende <- data.frame(b = 1:500 , rmse_train = NA , rmse_test = NA)
-curvas <- list()
-for (b in 1:500){
-     residuo <- train_m$voto_petro - f_train
-     tocon <- rpart(residuo ~ educ_superior , data=data.frame(residuo = residuo , educ_superior = train_m$educ_superior) ,
-                    control=rpart.control(maxdepth=1 , cp=0 , minsplit=10 , minbucket=5 , xval=0))
-     f_train <- f_train + lambda*predict(tocon)
-     f_test <- f_test + lambda*predict(tocon , test_m)
-     f_grilla <- f_grilla + lambda*predict(tocon , grilla)
-     aprende$rmse_train[b] <- sqrt(mean((train_m$voto_petro - f_train)^2))
-     aprende$rmse_test[b] <- sqrt(mean((test_m$voto_petro - f_test)^2))
-     if (b %in% c(1,10,50,500)) curvas[[as.character(b)]] <- f_grilla
-}
-
-## 5.3. dentro de muestra el error solo baja; en la prueba toca fondo y vuelve a subir
-## mira: el fondo llega en la ronda 48 (7,1) y en la 500 ya va en 7,3: a diferencia
-## del bosque, aqui B si sobreajusta (por eso la parada temprana)
-aprende[c(1,10,50,100,500),] %>% mutate(rmse_train = round(rmse_train,2) , rmse_test = round(rmse_test,2))
-aprende[which.min(aprende$rmse_test),]
-
-## 5.4. las escaleras: con 1 tocon casi la media; con 50, la forma; con 500, una
-## escalera fina que persigue los puntos
-plot(train_m$educ_superior , train_m$voto_petro , pch=16 , col="gray60" ,
-     xlab="educacion superior (%)" , ylab="voto por petro (%)")
-colores <- c("gray40" , "lightblue" , "blue" , "red")
-for (i in 1:4){
-     lines(grilla$educ_superior , curvas[[i]] , type="s" , col=colores[i] , lwd=2)
-}
-legend("topright" , legend=paste(names(curvas) , "tocones") , col=colores , lwd=2 , bty="n")
-
-##==: 6. la carrera: ¿encontro la maquina las interacciones? :==##
-
-## 6.1. el boosting del pais, con los mismos ingredientes que el lasso de la semana 3
-## (censo + departamento; xgboost necesita numeros: model.matrix crea las 33 dummies)
-x_train <- model.matrix(~ . - 1 , data=train[,c(x_censo,"dpto")])
-x_test <- model.matrix(~ . - 1 , data=test[,c(x_censo,"dpto")])
-dim(x_train)
-
-## 6.2. las perillas de la lamina 23: tasa 0,05, profundidad 6, 80% de filas y de
-## columnas por arbol. Las 738 rondas las eligio el juez con parada temprana en
-## week-05-replication.R: aqui no esperamos esa cv (tarda un minuto largo)
-parametros <- xgb.params(objective="reg:squarederror" , eta=0.05 , max_depth=6 ,
-                         subsample=0.8 , colsample_bytree=0.8 , eval_metric="rmse" , nthread=1)
-set.seed(2026)
-boost <- xgb.train(params=parametros , data=xgb.DMatrix(x_train , label=train$voto_petro) ,
-                   nrounds=738 , verbose=0)
-
-## 6.3. target predicho vs target original, y el error de prueba
-test$voto_pred <- predict(boost , xgb.DMatrix(x_test))
-test %>% select(nombre , departamento , voto_petro , voto_pred) %>% head(5)
-sqrt(mean((test$voto_petro - test$voto_pred)^2))
-
-## 6.4. tabla final: el rmse de prueba de lo que corrimos hoy
-## mira: con los mismos ingredientes, el boosting (12,8) le gana por 2,8 a la mejor
-## recta de la semana 3 (censo + dummies, 15,6): los cruces que encontro la maquina
-## valen lo que las dummies no alcanzan a contar. El promedio del boosting con el
-## k-nn del mapa deja 11,4: lo corre la replica
-tabla <- data.frame(modelo = c("la media del train (referencia)" ,
-                               "un arbol de seis hojas (censo)" ,
-                               "bosque (censo + departamento)" ,
-                               "boosting (censo + departamento)") ,
-                    rmse_test = c(sqrt(mean((test$voto_petro - mean(train$voto_petro))^2)) ,
-                                  sqrt(mean((test$voto_petro - predict(arbol_6 , test))^2)) ,
-                                  sqrt(tail(bosque$test$mse,1)) ,
-                                  sqrt(mean((test$voto_petro - test$voto_pred)^2))))
-tabla %>% mutate(rmse_test = round(rmse_test,1))
+## 6.3. la misma tabla en un grafico: gris el train, rojo el test
+barplot(t(as.matrix(tabla[,c("rmse_train","rmse_test")])) , beside=T , names.arg=tabla$modelo ,
+        col=c("gray70","red") , ylab="rmse (puntos del voto)" , cex.names=0.8)
+legend("topright" , legend=c("train","test") , fill=c("gray70","red") , bty="n")

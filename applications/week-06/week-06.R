@@ -366,7 +366,7 @@ for (a in variables){
 pares <- which(upper.tri(fuerza) , arr.ind=T)
 cruces <- data.frame(a = variables[pares[,1]] , b = variables[pares[,2]] , fuerza = 2*fuerza[pares]) %>% arrange(desc(fuerza))
 
-## los cruces de la semana 5 son, sobre todo, la etnia en cada departamento (lo que el lasso encontro en la semana 3)
+## los cruces de la semana 5 son, sobre todo, la etnia en cada departamento (las pendientes que la semana 3 no escribio a mano)
 cruces %>% mutate(fuerza = round(fuerza , 2)) %>% head(10)
 par(mar=c(4,12,2,1))
 barplot(rev(cruces$fuerza[1:10]) , names.arg=rev(paste(cruces$a[1:10] , "x" , cruces$b[1:10])) , horiz=T , las=1 ,

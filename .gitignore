@@ -40,6 +40,9 @@ applications/**/00_*.R
 # empíricas de cada deck. Se corren localmente; en GitHub sólo van sus productos (input/ y los PDF)
 backend_code/
 
+# Quices: se preparan localmente y Eduard los presenta en clase; no se publican
+quiz/
+
 # OS
 .DS_Store
 **/.DS_Store
