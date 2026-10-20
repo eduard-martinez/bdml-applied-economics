@@ -119,7 +119,16 @@ x_barajada[,col_dpto] <- x_barajada[orden,col_dpto]
 sube_dpto <- sqrt(mean((test$voto_petro - predict(modelo , xgb.DMatrix(x_barajada)))^2)) - rmse_modelo
 sube_dpto
 
-## 4.5. una sola barajada es ruidosa: el deck promedia diez (el loop esta en la replica)
+## 4.5. una sola barajada es ruidosa: diez barajadas de afro y su promedio, como el deck
+set.seed(2026)
+sube_diez <- rep(NA , 10)
+for (i in 1:10){
+     x_barajada <- x_test
+     x_barajada[,"afro"] <- sample(x_barajada[,"afro"])
+     sube_diez[i] <- sqrt(mean((test$voto_petro - predict(modelo , xgb.DMatrix(x_barajada)))^2)) - rmse_modelo
+}
+round(sube_diez , 2)
+mean(sube_diez)
 
 ##==: 5. un ejemplo de ablacion: quitar el departamento y reentrenar :==##
 
