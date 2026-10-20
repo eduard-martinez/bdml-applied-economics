@@ -1,6 +1,5 @@
 ## Big Data y Machine Learning para Economia Aplicada
 ## week-07: representar (comprimir con sentido)
-## Last run: Sep 25, 2026
 
 ##==: 0. initial setup :==##
 
@@ -100,8 +99,7 @@ arrows(pc_2$center[1] , pc_2$center[2] , pc_2$center[1] + 1.5*pc_2$sdev[1]*pc_2$
 arrows(pc_2$center[1] , pc_2$center[2] , pc_2$center[1] + 2*pc_2$sdev[2]*pc_2$rotation[1,2] ,
        pc_2$center[2] + 2*pc_2$sdev[2]*pc_2$rotation[2,2] , col="red" , lwd=3)
 
-## 2.2. el pca de las 37 columnas: prcomp estandariza con las medias y desviaciones del entrenamiento,
-## y predict aplica esas mismas a la prueba (tambien sin y hay pipeline)
+## 2.2. el pca de las 37: prcomp estandariza con el entrenamiento y predict aplica eso a la prueba
 pc <- prcomp(X , center=T , scale.=T)
 pve <- pc$sdev^2/sum(pc$sdev^2)
 round(100*pve[1:10] , 1)
@@ -116,8 +114,7 @@ tail(pve , 1)
 round(pc$rotation[abs(pc$rotation[,37]) > 0.5 , 37] , 3)
 range(train_p$edad_votar + train_p$edad_0_19)
 
-## 2.4. el signo de una componente es arbitrario: la PC1 se orienta para que crezca con la ruralidad
-## y la PC2 para que crezca con los ninos
+## 2.4. el signo es arbitrario: la PC1 se orienta con la ruralidad y la PC2 con los ninos
 if (pc$rotation["rural",1] < 0){
     pc$rotation[,1] <- -pc$rotation[,1]
     pc$x[,1] <- -pc$x[,1]
@@ -149,7 +146,7 @@ for (i in 1:nrow(correlaciones)){
 }
 correlaciones %>% mutate(across(-variable , ~ round(.x , 2)))
 
-## 2.5. el indice sin y, auditado con y: la PC1 explica el 0,9 % del voto, y no en linea recta
+## 2.5. el indice sin y, auditado con y
 r2_pc <- rep(NA , 37)
 for (k in 1:37){
      r2_pc[k] <- cor(z[,k] , train_p$voto_petro)^2
@@ -171,7 +168,7 @@ c(pc1_recta = sqrt(mean((test_p$voto_petro - predict(lm(y ~ z1 , data=d1) , d1_t
 
 ##==: 3. comprimir para predecir sin mirar y: la regresion sobre componentes :==##
 
-## 3.1. el juez de la semana 3 para M = 1, ..., 37: el pca se estima dentro de cada pliegue (cerca de medio minuto)
+## 3.1. la validacion cruzada de la semana 3 para M = 1, ..., 37: el pca dentro de cada pliegue
 pcr <- data.frame(M = 1:37 , rmse_cv = NA , rmse_test = NA)
 error_10 <- rep(NA , nrow(train_p))
 for (M in 1:37){
@@ -197,7 +194,7 @@ plot(pcr$M , pcr$rmse_cv , type="l" , col="blue" , lwd=2 , ylim=c(18,28) , xlab=
 lines(pcr$M , pcr$rmse_test , col="red" , lwd=2 , lty=2)
 abline(h=sqrt(mean((test_p$voto_petro - media_train)^2)) , lty=3)
 
-## 3.2. el salto del juez con 9 a 11 componentes tiene nombre: una componente es la columna palenquero sola
+## 3.2. el salto de la cv con 9 a 11 componentes tiene nombre: la columna palenquero sola
 peor <- which.max(abs(error_10))
 data.frame(nombre = train_p$nombre[peor] , municipio = train_p$municipio[peor] ,
            voto_petro = train_p$voto_petro[peor] , voto_pred = train_p$voto_petro[peor] - error_10[peor])
@@ -304,8 +301,7 @@ perfil5 %>% mutate(across(-c(grupo , n) , ~ round(.x , 1)))
 
 ##==: 5. con y: una red neuronal de una sola unidad :==##
 
-## 5.1. las entradas de la red: la ficha estandarizada con el entrenamiento, el departamento en ceros y unos,
-## y las coordenadas estandarizadas igual
+## 5.1. las entradas de la red: la ficha estandarizada, el departamento en ceros y unos, las coordenadas
 coord <- as.matrix(train_p[,c("lon","lat")])
 coord_t <- as.matrix(test_p[,c("lon","lat")])
 C <- sweep(sweep(coord , 2 , colMeans(coord)) , 2 , apply(coord , 2 , sd) , "/")
@@ -344,8 +340,7 @@ par(mfrow=c(1,1))
 
 ##==: 6. mas unidades, mas capacidad: el juez de las redes :==##
 
-## 6.1. la grilla: con la ficha y el departamento, K = 1, ..., 16 y tres penalizaciones; con la ficha sola y con
-## las coordenadas, una grilla mas corta. las entradas se estandarizan dentro de cada pliegue
+## 6.1. la grilla: K = 1, ..., 16 y tres penalizaciones por juego de ingredientes
 grid_red <- rbind(expand.grid(ingredientes="dpto" , K=c(1,2,4,8,16) , decay=c(0.01,0.1,1) , stringsAsFactors=F) ,
                   expand.grid(ingredientes=c("ficha","todo") , K=c(4,8,16) , decay=c(0.01,0.1) , stringsAsFactors=F))
 grid_red$rmse_cv <- NA
@@ -387,7 +382,7 @@ lines(1:5 , grid_red$rmse_cv[grid_red$ingredientes=="dpto" & grid_red$decay==0.1
 lines(1:5 , grid_red$rmse_cv[grid_red$ingredientes=="dpto" & grid_red$decay==1] , type="b" , pch=16 , col="orange")
 legend("topright" , legend=c("decay 0,01","decay 0,1","decay 1") , col=c("red","blue","orange") , lwd=2)
 
-## 6.3. la red que elige el juez con cada juego de ingredientes
+## 6.3. la red que elige la validacion cruzada con cada juego de ingredientes
 elegida <- grid_red %>% group_by(ingredientes) %>% arrange(rmse_cv) %>% mutate(ranking = row_number()) %>% subset(ranking==1)
 elegida
 
@@ -458,7 +453,7 @@ sqrt(mean((test_p$voto_petro - test_p$voto_pred)^2))
 
 ##==: 10. la carrera: suma la red al promedio de la semana 5? :==##
 
-## 10.1. el boosting de la semana 5 (ficha + departamento, d = 6, tasa 0,05) con las 738 rondas que eligio su juez
+## 10.1. el boosting de la semana 5 (ficha + departamento, d = 6, tasa 0,05) con las 738 rondas de su cv
 x_dpto_m <- model.matrix(~ . - 1 , data=train_p[,x_dpto])
 x_dpto_t <- model.matrix(~ . - 1 , data=test_p[,x_dpto])
 parametros <- xgb.params(objective="reg:squarederror" , eta=0.05 , max_depth=6 , subsample=0.8 , colsample_bytree=0.8 ,
@@ -484,8 +479,7 @@ cor(test_p$voto_petro - pred_redes , test_p$voto_petro - pred_boosting)
 
 ##==: 11. cuando no hay columnas: el voto como una imagen :==##
 
-## 11.1. una imagen es una matriz de numeros: celdas de un cuarto de grado con el voto promedio de sus puestos
-## (el territorio continental: San Andres y Providencia quedan fuera del recuadro)
+## 11.1. una imagen es una matriz de numeros: celdas de un cuarto de grado con el voto promedio
 continental <- db %>% subset(lon > -80 & lon < -66 & lat > -5 & lat < 13.5)
 continental <- continental %>% mutate(fila = floor((lat + 4.5)/0.25) + 1 , columna = floor((lon + 79.25)/0.25) + 1)
 por_celda <- continental %>% group_by(fila , columna) %>% summarise(voto = mean(voto_petro) , n = n() , .groups="drop")

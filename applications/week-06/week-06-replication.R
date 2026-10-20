@@ -1,5 +1,7 @@
 ## Big Data y Machine Learning para Economia Aplicada
-## week-06: abrir la caja negra (que aprendio la maquina)
+## week-06-replication: replica todas las cifras de las diapositivas de la semana 6
+## (abrir la caja negra: que aprendio la maquina). La aplicacion corta de clase es
+## week-06-application.R
 ## Last run: Sep 25, 2026
 
 ##==: 0. initial setup :==##
@@ -23,7 +25,7 @@ url <- "https://raw.githubusercontent.com/eduard-martinez/bdml-applied-economics
 puestos <- import("input/puestos_colombia_2022.rds" , trust=T)
 censo <- import("input/censo_puestos_2022.rds" , trust=T)
 
-## 1.2. la ficha del censo de la semana 3: de conteos a proporciones (una categoria por bloque queda por fuera)
+## 1.2. las 37 del censo de la semana 3: de conteos a proporciones (una categoria por bloque queda por fuera)
 ficha <- censo %>%
          mutate(con_nivel = educ_ninguna + educ_basica + educ_tecnica + educ_superior,
                 con_etnia = etnia_ninguna + indigena + rom + raizal + palenquero + afro) %>%
@@ -49,7 +51,7 @@ ficha <- censo %>%
                    log_distancia = log(1 + distancia_media) ,
                    desfase = pmin(pmax(desfase , -100) , 300))
 
-## 1.3. la base: el puesto, los dos targets de siempre y la ficha; el departamento como una sola variable
+## 1.3. la base: el puesto, los dos targets de siempre y las 37; el departamento como una sola variable
 db <- puestos %>%
       select(puesto , nombre , departamento , municipio , cod_municipio , zona , lon , lat , registrados ,
              voto_petro , gana_petro , muestra) %>%
@@ -59,7 +61,7 @@ db <- puestos %>%
       subset(!is.na(educ_superior) & !is.na(afro))
 nrow(db)
 
-## 1.4. los ingredientes del modelo de hoy: la ficha de 37 y el departamento (los de la semana 3)
+## 1.4. los ingredientes del modelo de hoy: las 37 del censo y el departamento (los de la semana 3)
 x_ficha <- c(setdiff(names(ficha) , "puesto") , "log_registrados" , "rural")
 x_dpto <- c(x_ficha , "dpto")
 length(x_ficha)
@@ -102,7 +104,7 @@ cv_xgb <- function(x , y , pliegues , objetivo , d , eta){
           return(list(rondas=cv$early_stop$best_iteration , parametros=parametros))
 }
 
-## 2.2. el boosting de la ficha + departamento: d = 6 y tasa 0,05, con las rondas que elige el juez (cerca de un minuto)
+## 2.2. el boosting de censo + departamento: d = 6 y tasa 0,05, con las rondas que elige la validacion cruzada (cerca de un minuto)
 juez <- cv_xgb(x_dpto_m , train_p$voto_petro , pliegues_p , "reg:squarederror" , 6 , 0.05)
 juez$rondas
 set.seed(2026)

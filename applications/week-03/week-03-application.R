@@ -1,8 +1,5 @@
 ## Big Data y Machine Learning para Economia Aplicada
-## week-03-application: la aplicacion de clase. El juez y la perilla por dentro
-## (cv, ridge y lasso con las 37 del censo). La replica completa de las
-## diapositivas es week-03-replication.R
-## Last run: Oct 8, 2026
+## week-03-application: el juez y la perilla por dentro (cv, ridge y lasso con las 37)
 
 ##==: 0. initial setup :==##
 
@@ -68,14 +65,11 @@ for (j in 1:10){
 }
 cv_ols %>% mutate(mse = round(mse,1) , rmse = round(rmse,2))
 
-## 2.4. el estimador y su ee: el rmse de cv es un promedio, y un promedio trae error estandar
-## (la formula del deck: ee = d.e.(mse_1 , ... , mse_J)/raiz de J)
-## con 9.602 puestos el veredicto es firme: el ee queda chico frente al mse
+## 2.4. el rmse de cv es un promedio, y un promedio trae error estandar (ee)
 ee_ols <- sd(cv_ols$mse)/sqrt(10)
 c(rmse_cv = sqrt(mean(error2)) , ee_del_mse = ee_ols)
 
 ## 2.5. pintar el juez: los 10 mse, su promedio (linea) y promedio +/- ee (punteadas)
-## (la dispersion entre pliegues es exactamente lo que mide el ee)
 plot(cv_ols$pliegue , cv_ols$mse , pch=16 , col="blue" ,
      xlab="pliegue" , ylab="mse de validacion")
 abline(h = mean(cv_ols$mse) , col="blue" , lwd=2)
@@ -86,13 +80,10 @@ abline(h = mean(cv_ols$mse) + c(-1,1)*ee_ols , lty=2)
 ## 3.1. el juez de glmnet con los mismos pliegues (la grilla se alarga para ver el minimo)
 ridge <- cv.glmnet(x=x_train , y=y_train , alpha=0 , foldid=pliegue , lambda.min.ratio=1e-6 , nlambda=150)
 
-## 3.2. el camino de los 37 coeficientes: hacia la derecha sube el precio y todos
-## se encogen hacia cero sin apagarse (mirar este grafico antes de correr el siguiente)
+## 3.2. el camino: hacia la derecha sube el precio y todos se encogen sin apagarse
 plot(ridge$glmnet.fit , xvar="lambda")
 
-## 3.3. la curva del juez: el error de cv de cada lambda
-## (cada barra es el ee de ese lambda, el mismo de la seccion 2; las lineas
-## punteadas marcan lambda_min y lambda_1se)
+## 3.3. la curva del juez: el error de cv de cada lambda, con su ee en cada barra
 plot(ridge)
 
 ## 3.4. los dos lambda del juez y su rmse de cv
@@ -101,21 +92,17 @@ i_1se_r <- which.min(abs(ridge$lambda - ridge$lambda.1se))
 c(lambda_min = ridge$lambda.min , rmse_cv_min = sqrt(ridge$cvm[i_min_r]) ,
   lambda_1se = ridge$lambda.1se , rmse_cv_1se = sqrt(ridge$cvm[i_1se_r]))
 
-## 3.5. zoom a las variables: tres paradas del camino (lambda casi 0, el elegido y el de 1se)
-## con 9.602 puestos y 37 columnas el juez elige el extremo: lambda_min es el lambda mas
-## chico de la grilla y sus coeficientes son los de ols (no hay varianza que comprar);
-## el encogimiento se ve en la columna de 1se, un precio mas alto
+## 3.5. zoom a tres paradas del camino: lambda casi 0, el elegido y el de 1se
 betas_r <- as.matrix(ridge$glmnet.fit$beta)
 zoom_r <- data.frame(lambda_cero = betas_r[,ncol(betas_r)] ,
                      lambda_min = betas_r[,i_min_r] ,
                      lambda_1se = betas_r[,i_1se_r])
 zoom_r %>% arrange(desc(abs(lambda_cero))) %>% round(3) %>% head(8)
 
-## cuantas quedan en cero exacto aun con el precio de 1se: ninguna (ridge nunca apaga)
+## cuantas quedan en cero exacto: ridge nunca apaga
 sum(zoom_r$lambda_1se==0)
 
-## 3.6. pintar el encogimiento (con el precio de 1se: con el del juez seria la diagonal):
-## cada punto es una variable; todos van hacia cero y ninguno llega
+## 3.6. pintar el encogimiento con el precio de 1se (con el del juez seria la diagonal)
 plot(zoom_r$lambda_cero , zoom_r$lambda_1se , pch=16 , col="blue" ,
      xlab="coeficiente con lambda casi 0 (ols)" , ylab="coeficiente con el lambda de 1se")
 abline(a=0 , b=1 , lty=2)
@@ -127,7 +114,6 @@ abline(h=0 , v=0 , col="gray70")
 lasso <- cv.glmnet(x=x_train , y=y_train , alpha=1 , foldid=pliegue)
 
 ## 4.2. el camino: a diferencia de ridge, las curvas mueren en cero exacto
-## (el eje de arriba dice cuantas variables siguen vivas a cada precio)
 plot(lasso$glmnet.fit , xvar="lambda")
 
 ## 4.3. la curva del juez para el lasso
@@ -139,13 +125,11 @@ i_1se_l <- which.min(abs(lasso$lambda - lasso$lambda.1se))
 c(lambda_min = lasso$lambda.min , rmse_cv_min = sqrt(lasso$cvm[i_min_l]) ,
   lambda_1se = lasso$lambda.1se , rmse_cv_1se = sqrt(lasso$cvm[i_1se_l]))
 
-## 4.5. de donde sale lambda.1se: el ee del minimo define el empate
-## (el mayor lambda cuyo mse de cv queda debajo de minimo + ee: mas simple, sin perder de verdad)
+## 4.5. de donde sale lambda.1se: el mayor lambda que empata con el minimo dentro de su ee
 techo <- lasso$cvm[i_min_l] + lasso$cvsd[i_min_l]
 c(a_mano = max(lasso$lambda[lasso$cvm <= techo]) , de_glmnet = lasso$lambda.1se)
 
-## 4.6. zoom a una parada cualquiera del camino: el quinto lambda de la grilla
-## (cambie el 5 por otro indice y vuelva a correr; con ridge funciona igual)
+## 4.6. zoom a una parada cualquiera: el quinto lambda (cambie el 5 y vuelva a correr)
 i <- 5
 c(lambda = lasso$lambda[i] , rmse_cv = sqrt(lasso$cvm[i]) , activas = unname(lasso$nzero[i]))
 
@@ -162,8 +146,7 @@ abline(v = log(c(lasso$lambda.min , lasso$lambda.1se)) , lty=2)
 entrada <- apply(betas_l!=0 , 1 , function(x) which(x)[1])
 names(sort(entrada))[1:6]
 
-## 4.8. lo que queda con cada lambda: 36 con el minimo y 30 con la regla 1se
-## (con n grande la penalizacion apenas muerde: casi todas las 37 aportan)
+## 4.8. lo que queda con cada lambda: el minimo y la regla 1se
 sum(betas_l[,i_min_l]!=0)
 coef_1se <- coef(lasso , s="lambda.1se")
 round(coef_1se[coef_1se[,1]!=0 , , drop=F] , 3)
@@ -177,9 +160,7 @@ par(mar=c(5,4,4,2) + 0.1)
 
 ##==: 5. la escala: estandarizar antes de penalizar :==##
 
-## 5.1. las 37 no viven en la misma escala (la promesa del comentario de 1.4)
-## el peaje cobra por el tamano del coeficiente: una variable de unidades chicas
-## necesita un coeficiente grande (cara) y una de unidades grandes, uno chico (barata)
+## 5.1. las 37 no viven en la misma escala, y el peaje cobra por el tamano del coeficiente
 sds <- apply(x_train , 2 , sd)
 round(head(sort(sds) , 3) , 2)
 round(tail(sort(sds) , 3) , 2)
@@ -189,22 +170,18 @@ lasso_crudo <- cv.glmnet(x=x_train , y=y_train , alpha=1 , foldid=pliegue , stan
 c(rmse_cv_min = sqrt(min(lasso_crudo$cvm)) ,
   coeficientes = unname(lasso_crudo$nzero[which.min(lasso_crudo$cvm)]))
 
-## el orden de entrada cambia: sin estandarizar mandan las variables baratas (sd grande)
+## el orden de entrada cambia: mandan las de sd grande
 betas_c <- as.matrix(lasso_crudo$glmnet.fit$beta)
 entrada_c <- apply(betas_c!=0 , 1 , function(x) which(x)[1])
 names(sort(entrada_c))[1:6]
 
-## 5.3. el veredicto y la practica: dejamos que glmnet lo haga por dentro
-## (standardize=T es el default: penaliza en la escala comun y reporta los
-## coeficientes en las unidades originales)
+## 5.3. el veredicto: dejamos que glmnet estandarice por dentro (el default)
 c(estandarizado = sqrt(min(lasso$cvm)) , crudo = sqrt(min(lasso_crudo$cvm)))
 
 ##==: 6. tabla final :==##
 
-## rmse dentro y de cv de los cuatro modelos (el juez decide; la prueba sigue bajo llave)
-## las cuatro filas casi empatan: con 9.602 puestos las 37 no necesitan peaje;
-## la perilla paga cuando las columnas compiten con las filas (la parte B de
-## week-03-replication.R: 37 columnas para 257 puestos)
+## rmse dentro y de cv de los cuatro modelos (la prueba sigue bajo llave)
+## mira: casi empatan; con 9.602 puestos las 37 no necesitan peaje
 tabla <- data.frame(modelo = c("ols con las 37 del censo","ridge (lambda min)","lasso (lambda min)","lasso (lambda 1se)"),
                     coeficientes = c(sum(!is.na(coef(modelo_ols))) - 1 , unname(ridge$nzero[i_min_r]) ,
                                      unname(lasso$nzero[i_min_l]) , unname(lasso$nzero[i_1se_l])),

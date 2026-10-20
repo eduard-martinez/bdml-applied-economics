@@ -1,6 +1,5 @@
 ## Big Data y Machine Learning para Economia Aplicada
 ## week-02: la regresion lineal como maquina de predecir
-## Last run: Sep 22, 2026
 
 ##==: 0. initial setup :==##
 

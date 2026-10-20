@@ -24,8 +24,10 @@ auc <- function(y , p){
 ## la matriz de confusion y sus metricas, con el umbral tau
 matriz <- function(y , p , tau = 0.5){
           yhat <- as.integer(p >= tau)
-          vp <- sum(yhat==1 & y==1) ; fn <- sum(yhat==0 & y==1)
-          fp <- sum(yhat==1 & y==0) ; vn <- sum(yhat==0 & y==0)
+          vp <- sum(yhat==1 & y==1)
+          fn <- sum(yhat==0 & y==1)
+          fp <- sum(yhat==1 & y==0)
+          vn <- sum(yhat==0 & y==0)
           c(vp = vp , fn = fn , fp = fp , vn = vn ,
             exactitud = (vp + vn)/length(y) , sensibilidad = vp/(vp + fn) ,
             especificidad = vn/(vn + fp) , precision = vp/(vp + fp))
@@ -152,7 +154,10 @@ for (i in 1:2){
      eleccion$exactitud[i] <- m[["exactitud"]]
      eleccion$especificidad[i] <- m[["especificidad"]]
      eleccion$auc[i] <- auc(te$gana , p)
-     if (i==1){p_mockus <- 1 - p ; y_mockus <- 1 - te$gana}
+     if (i==1){
+          p_mockus <- 1 - p
+          y_mockus <- 1 - te$gana
+     }
 }
 
 ## en 2010 "Santos gana en todos" acierta el 88%: la exactitud premia la dominancia;
