@@ -32,6 +32,9 @@ lectures/**/archive/
 # Borradores locales de problem sets; los enunciados finales se publican en PDF
 problem-sets/**/borrador/
 
+# Plataforma de verificación del Problem Set 2: lleva el target oculto; no se publica
+problem-sets/pset-2/app/
+
 # Generadores de datos simulados de las aplicaciones (00_*.R): se corren localmente y nunca se publican;
 # en GitHub solo van los datos que producen (input/)
 applications/**/00_*.R

@@ -1,0 +1,13 @@
+variable,descripcion
+id,identificador del aviso (el mismo del Problem Set 1)
+grupo,"solo en la base de entrenamiento: avisos en el mismo punto del mapa (misma lat y lon), como el mismo aviso repetido o varios del mismo edificio; un aviso solo en su punto forma su propio grupo"
+tipo,Casa o Apartamento
+area,area en metros cuadrados (construida; total si falta)
+habitaciones,numero de habitaciones (faltante en parte de los avisos)
+banos,numero de banos
+barrio,barrio reportado en el aviso (vacio en la mayoria)
+lon,longitud
+lat,latitud
+anio,anio de publicacion del aviso (2019 o 2020)
+precio,precio de venta en millones de pesos
+piscina,solo en la base de entrenamiento: 1 si el titulo o la descripcion del aviso anuncian piscina
